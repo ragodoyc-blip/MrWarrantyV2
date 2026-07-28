@@ -1,0 +1,32 @@
+# Entorno virtual
+.venv/
+
+# Credenciales y configuración local
+.env
+
+# Archivos sensibles
+cookies.py
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Datos generados
+AdjuntosSQIS/
+*.log
+tablas_salesforce.json
+Reclamos_Procesados_pendientes.jsonl
+
+# Archivos de datos
+Reclamos_Procesados.xlsx
+StanRate.xlsx
+
+# EdgeDriver
+edgedriver_win64/
+
+# IDE
+.vscode/
+.idea/

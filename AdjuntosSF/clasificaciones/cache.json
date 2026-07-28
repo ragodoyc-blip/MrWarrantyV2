@@ -1,0 +1,312 @@
+{
+  "069Nr00000ZVEaSIAX": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Formulario de solicitud de garantía con análisis de falla y detalles técnicos."
+  },
+  "069Nr00000hQ5xqIAC": {
+    "categoria": "otro",
+    "confianza": 0.98,
+    "razon": "Es una guia de despacho, no corresponde a reporte tecnico ni evidencia tecnica."
+  },
+  "069Nr00000g8njJIAQ": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Formulario de garantía con análisis de falla y detalles técnicos del equipo."
+  },
+  "069Nr00000gT5aSIAS": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Contiene procedimiento técnico y despiece de inyectores, típico de un informe técnico."
+  },
+  "069Nr00000iQ5MAIA0": {
+    "categoria": "otro",
+    "confianza": 0.98,
+    "razon": "Es una cotización de repuestos, no corresponde a reporte técnico ni análisis."
+  },
+  "069Nr00000iQ7hJIAS": {
+    "categoria": "otro",
+    "confianza": 0.98,
+    "razon": "Es una cotización de repuestos, no corresponde a reporte técnico ni análisis."
+  },
+  "069Nr00000jgFIdIAM": {
+    "categoria": "otro",
+    "confianza": 0.98,
+    "razon": "Es una cotización de repuestos, no corresponde a reporte técnico ni análisis."
+  },
+  "069Nr00000jvQC0IAM": {
+    "categoria": "otro",
+    "confianza": 0.98,
+    "razon": "Es una cotización de repuestos, no corresponde a reporte técnico ni análisis."
+  },
+  "069Nr00000kqXyKIAU": {
+    "categoria": "otro",
+    "confianza": 0.99,
+    "razon": "Es una guia de despacho electronica, no corresponde a reporte tecnico ni evidencia."
+  },
+  "069Nr00000kqXyLIAU": {
+    "categoria": "otro",
+    "confianza": 0.99,
+    "razon": "Es una guia de despacho/factura, no corresponde a reporte tecnico ni evidencia."
+  },
+  "069Nr00000krLLgIAM": {
+    "categoria": "otro",
+    "confianza": 0.99,
+    "razon": "Es una guia de despacho electrónica, no corresponde a reporte técnico ni análisis."
+  },
+  "069Nr00000krLLhIAM": {
+    "categoria": "otro",
+    "confianza": 0.99,
+    "razon": "Es una guia de despacho/factura, no corresponde a reporte tecnico ni evidencia."
+  },
+  "069Nr00000kCbnhIAC": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "Es una factura comercial (Commercial Invoice), no corresponde a reporte técnico ni análisis."
+  },
+  "0692S00000IFtM8QAL": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Contiene notas de servicio y diagramas técnicos explicativos."
+  },
+  "069Nr00000kCVFJIA4": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "Es una factura comercial (Commercial Invoice), no corresponde a reporte técnico ni análisis."
+  },
+  "069Nr00000kCbR9IAK": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "Es una factura electrónica, no corresponde a reporte técnico ni análisis técnico."
+  },
+  "069Nr00000flCnmIAE": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Contiene reportes de avance, desviaciones y tareas técnicas de comisionamiento."
+  },
+  "069Nr00000fp6rnIAA": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Contiene analisis de tareas, desviaciones y avances de comisionamiento."
+  },
+  "069Nr00000fsec4IAA": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Contiene avance, desviaciones y tareas de comisionamiento del equipo."
+  },
+  "069Nr00000fwaecIAA": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Contiene informe de avance, desviaciones y tareas técnicas de comisionamiento."
+  },
+  "069Nr00000fzwQsIAI": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Contiene reporte diario de comisionamiento, tareas, desviaciones y pendientes."
+  },
+  "069Nr00000g1Kz8IAE": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Es un informe diario de comisionamiento con análisis de tareas, desviaciones y pendientes."
+  },
+  "069Nr00000g4qzDIAQ": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Es un reporte diario de comisionamiento con análisis de tareas, desviaciones y avances."
+  },
+  "069Nr00000gAAyqIAG": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Contiene reporte de avance, desviaciones y tareas técnicas de comisionamiento."
+  },
+  "069Nr00000gCUgTIAW": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Es un informe diario de comisionamiento con análisis de tareas, desviaciones y avances técnicos."
+  },
+  "069Nr00000gIhWJIA0": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Contiene reporte de avance, desviaciones y tareas técnicas del comisionado."
+  },
+  "069Nr00000gJEv7IAG": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Es un informe de comisionamiento con tareas, desviaciones y avance técnico."
+  },
+  "069Nr00000gK8kPIAS": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Contiene informe de avance, desviaciones y tareas técnicas del comisionado."
+  },
+  "069Nr00000gLWcgIAG": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Contiene reporte de avance, desviaciones y tareas técnicas de comisionamiento."
+  },
+  "069Nr00000gP30xIAC": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Es un informe de comisionamiento con análisis de tareas, desviaciones y avances técnicos."
+  },
+  "069Nr00000gP457IAC": {
+    "categoria": "reporte_tecnico",
+    "confianza": 1.0,
+    "razon": "Documento describe armado, aceptación, certificación y procedimientos técnicos del equipo."
+  },
+  "069Nr00000gPCh8IAG": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.98,
+    "razon": "Es un informe de comisionamiento con análisis de tareas, desviaciones y avance."
+  },
+  "069Nr00000gPK6cIAG": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Documento describe parámetros, certificación y conformidad de tecnologías instaladas."
+  },
+  "069Nr00000bXI2WIAW": {
+    "categoria": "otro",
+    "confianza": 0.99,
+    "razon": "Es una guia de despacho con detalles de transporte y compra, no tecnica."
+  },
+  "069Nr00000bXJjKIAW": {
+    "categoria": "otro",
+    "confianza": 0.99,
+    "razon": "Es una guia de despacho de repuesto, no corresponde a reporte tecnico ni analisis."
+  },
+  "069Nr00000lCB7wIAG": {
+    "categoria": "otro",
+    "confianza": 0.98,
+    "razon": "Es una liquidación de orden de servicio, similar a una factura u orden de compra."
+  },
+  "069Nr00000lhRy2IAE": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Contiene análisis de falla, hallazgos técnicos, conclusiones y recomendaciones sobre componentes mecánicos."
+  },
+  "069Nr00000lhbXcIAI": {
+    "categoria": "otro",
+    "confianza": 0.99,
+    "razon": "Es una factura (FINAL INVOICE) con lista de partes y precios, no es reporte tecnico."
+  },
+  "069Nr00000lhozXIAQ": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "Es una factura (FINAL INVOICE) con detalles de compra y envío de partes."
+  },
+  "069Nr00000lhpaWIAQ": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "Es una factura (FINAL INVOICE) con detalles de compra y precios."
+  },
+  "069Nr00000lhrajIAA": {
+    "categoria": "otro",
+    "confianza": 0.95,
+    "razon": "Es una liquidación de orden de servicio con costos, repuestos y mano de obra, no es reporte técnico."
+  },
+  "069Nr00000lhtXgIAI": {
+    "categoria": "otro",
+    "confianza": 0.95,
+    "razon": "El documento es una cotización/presupuesto, no un informe técnico ni reporte de falla."
+  },
+  "069Nr00000lhynVIAQ": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "Es una factura (FINAL INVOICE) con lista de partes y precios."
+  },
+  "069Nr00000liArpIAE": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "El documento es una factura (FINAL INVOICE), no corresponde a reporte técnico ni análisis."
+  },
+  "069Nr00000lkGoNIAU": {
+    "categoria": "otro",
+    "confianza": 0.95,
+    "razon": "Es una liquidación de orden de servicio, similar a una factura o work order."
+  },
+  "069Nr00000ll0MUIAY": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Describe eventos, inspecciones y reemplazo de componente, típico de informe técnico."
+  },
+  "069Nr00000lpMWVIA2": {
+    "categoria": "analisis_aceite",
+    "confianza": 1.0,
+    "razon": "Contiene resultados de laboratorio de aceite, elementos, viscosidad y particulas."
+  },
+  "069Nr00000l6KCJIA2": {
+    "categoria": "analisis_aceite",
+    "confianza": 1.0,
+    "razon": "Contiene resultados de laboratorio de aceite, elementos, viscosidad y particulas."
+  },
+  "069Nr00000m5v5HIAQ": {
+    "categoria": "otro",
+    "confianza": 0.95,
+    "razon": "Es una liquidación de orden de servicio con costos y repuestos, no es reporte técnico."
+  },
+  "069Nr00000m63nfIAA": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Contiene un registro detallado de actividades y análisis de un problema técnico."
+  },
+  "069Nr00000m64jeIAA": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "El documento es una factura (FINAL INVOICE), no corresponde a reporte técnico, PLM, análisis de aceite ni fotografías."
+  },
+  "069Nr00000m656DIAQ": {
+    "categoria": "otro",
+    "confianza": 0.99,
+    "razon": "El documento es una factura (invoice), no corresponde a reporte técnico, PLM, análisis de aceite ni evidencia fotográfica."
+  },
+  "069Nr00000lrlk8IAA": {
+    "categoria": "otro",
+    "confianza": 0.95,
+    "razon": "Es una liquidación de orden de servicio con costos y repuestos, no es reporte técnico."
+  },
+  "069Nr00000lxuccIAA": {
+    "categoria": "otro",
+    "confianza": 0.95,
+    "razon": "Es una liquidación de orden de servicio, similar a factura u orden de compra."
+  },
+  "069Nr00000ly0jpIAA": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "Es una factura de servicios aduanales, no corresponde a reporte técnico ni análisis."
+  },
+  "069Nr00000m1g6QIAQ": {
+    "categoria": "otro",
+    "confianza": 0.95,
+    "razon": "Es una liquidación de orden de servicio con costos y repuestos, no es reporte técnico."
+  },
+  "069Nr00000m1rQ1IAI": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "Es una factura (final invoice), no corresponde a reporte técnico ni evidencia."
+  },
+  "069Nr00000m1uZBIAY": {
+    "categoria": "otro",
+    "confianza": 0.99,
+    "razon": "Es una factura (final invoice) de partes, no corresponde a reporte técnico ni PLM."
+  },
+  "069Nr00000m1uanIAA": {
+    "categoria": "otro",
+    "confianza": 0.98,
+    "razon": "Es una orden de servicio con costos, no es reporte técnico ni análisis."
+  },
+  "069Nr00000hyvtzIAA": {
+    "categoria": "otro",
+    "confianza": 1.0,
+    "razon": "Es una orden de compra (purchase order) con lista de materiales y precios."
+  },
+  "069Nr00000hz8XmIAI": {
+    "categoria": "otro",
+    "confianza": 0.98,
+    "razon": "Es una orden de compra con terminos y condiciones, no corresponde a reporte tecnico ni PLM."
+  },
+  "069Nr00000VHfuXIAT": {
+    "categoria": "reporte_tecnico",
+    "confianza": 0.95,
+    "razon": "Dibujo técnico con especificaciones de fabricación y notas técnicas de ingeniería."
+  }
+}
