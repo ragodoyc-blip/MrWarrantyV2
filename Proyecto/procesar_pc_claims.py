@@ -18,6 +18,7 @@ from API_Salesforce import (
     obtener_repair_date,
     obtener_coverage_type,
 )
+from utils import parse_datetime, strip_tz, calcular_score_adjuntos
 from Promps import (
     validar_adjunto_con_ia,
     validar_photographs_con_ia,
@@ -88,7 +89,8 @@ def main():
             # 2. Obtener CoverageType y Repair Date
             coverage = obtener_coverage_type(claim_id)
             coverage_type = coverage.get("coverage_type", "")
-            repair_date = obtener_repair_date(claim_id)
+            repair_date_raw = obtener_repair_date(claim_id)
+            repair_date_dt = strip_tz(parse_datetime(repair_date_raw)) if repair_date_raw else None
 
             # 3. Obtener modelo y serial
             modelo_serial = obtener_modelo_serial_tsi(tsi_id) if tsi_id else {"modelo": "", "serial": ""}
@@ -133,9 +135,10 @@ def main():
             # 10. Extraer fecha de instalacion con IA
             try:
                 resultado_fi = extraer_fecha_instalacion_parte(datos, Diccionario_Chatter)
-                fecha_instalacion = resultado_fi.get("fecha")
+                fecha_instalacion_str = resultado_fi.get("fecha")
+                fecha_instalacion_dt = strip_tz(parse_datetime(fecha_instalacion_str)) if fecha_instalacion_str else None
                 fecha_instalacion_reason = resultado_fi.get("razon", "")
-                log.info("  Fecha instalacion: %s (confianza=%.2f)", fecha_instalacion, resultado_fi.get("confianza", 0))
+                log.info("  Fecha instalacion: %s (confianza=%.2f)", fecha_instalacion_str, resultado_fi.get("confianza", 0))
             except Exception as e:
                 log.error("  Error extrayendo fecha instalacion: %s", e)
                 fecha_instalacion = None
@@ -159,21 +162,18 @@ def main():
                 purchase_invoice_result = {"score": 0, "reason": f"Error: {e}"}
 
             # 13. Validacion estandar con logica PC
-            DiccionarioValidacionSTD = ValidacionStandard(datos, es_pc=True, fecha_instalacion_parte=fecha_instalacion)
+            DiccionarioValidacionSTD = ValidacionStandard(datos, es_pc=True, fecha_instalacion_parte=fecha_instalacion_str)
 
-            # 14. Calcular scores con ponderaciones PC
+            # 14. Calcular scores con Opción C (max keywords e IA)
             pond = PONDERACIONES_STD_SF_PC
-            score_plm = pond["plm"] if clasif["plm"] else 0
-            score_aceite = pond["analisis_aceite"] if clasif["analisis_aceite"] else 0
-            score_datapacks = pond["datapacks"] if clasif["datapacks"] else 0
-            score_tr = pond["technical_report"] if clasif["reporte_tecnico"] else 0
-            score_photos = pond["photographs"] if clasif["fotografias"] else 0
+            adj_scores = calcular_score_adjuntos(clasif, pond, tr_result, plm_result, photo_result)
 
             score_total = (
                 DiccionarioValidacionSTD.get("within_standard_warranty_ponderacion", 0) +
                 DiccionarioValidacionSTD.get("Repair_deadline_ponderacion", 0) +
                 DiccionarioValidacionSTD.get("Claim_Deadline_ponderacion", 0) +
-                score_tr + score_photos + score_plm + score_aceite + score_datapacks +
+                adj_scores["score_tr"] + adj_scores["score_photos"] + adj_scores["score_plm"] +
+                adj_scores["score_aceite"] + adj_scores["score_datapacks"] +
                 work_order_result["score"] + purchase_invoice_result["score"]
             )
 
@@ -182,7 +182,8 @@ def main():
                      DiccionarioValidacionSTD.get("within_standard_warranty_ponderacion", 0),
                      DiccionarioValidacionSTD.get("Repair_deadline_ponderacion", 0),
                      DiccionarioValidacionSTD.get("Claim_Deadline_ponderacion", 0),
-                     score_tr, score_photos, score_plm, score_aceite, score_datapacks,
+                     adj_scores["score_tr"], adj_scores["score_photos"], adj_scores["score_plm"],
+                     adj_scores["score_aceite"], adj_scores["score_datapacks"],
                      work_order_result["score"], purchase_invoice_result["score"])
 
             # 15. UPDATE en SQL
@@ -218,19 +219,19 @@ def main():
                     updated_at = SYSUTCDATETIME()
                 WHERE claim_number = ? AND plataforma = 'Salesforce'
             """,
-                modelo, serial, coverage_type, repair_date,
-                fecha_instalacion, fecha_instalacion_reason,
+                modelo, serial, coverage_type, repair_date_dt,
+                fecha_instalacion_dt, fecha_instalacion_reason,
                 DiccionarioValidacionSTD.get("within_standard_warranty_ponderacion", 0),
                 DiccionarioValidacionSTD.get("within_standard_warranty_reason", ""),
                 DiccionarioValidacionSTD.get("Repair_deadline_ponderacion", 0),
                 DiccionarioValidacionSTD.get("Repair_deadline_reason", ""),
                 DiccionarioValidacionSTD.get("Claim_Deadline_ponderacion", 0),
                 DiccionarioValidacionSTD.get("Claim_Deadline_reason", ""),
-                score_tr, tr_result["reason"],
-                score_photos, photo_result["reason"],
-                score_plm, plm_result["reason"],
-                score_aceite, ", ".join(clasif["analisis_aceite"]) or "No encontrado",
-                score_datapacks, ", ".join(clasif["datapacks"]) or "No encontrado",
+                adj_scores["score_tr"], adj_scores["tr_reason"],
+                adj_scores["score_photos"], adj_scores["photos_reason"],
+                adj_scores["score_plm"], adj_scores["plm_reason"],
+                adj_scores["score_aceite"], adj_scores["aceite_reason"],
+                adj_scores["score_datapacks"], adj_scores["datapacks_reason"],
                 work_order_result["score"], work_order_result["reason"],
                 purchase_invoice_result["score"], purchase_invoice_result["reason"],
                 claim_name,

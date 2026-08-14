@@ -47,6 +47,7 @@ from Ponderaciones import PONDERACIONES_STD, PONDERACIONES_FC, PONDERACIONES_STD
 from Adjuntos_SQIS import AdjuntosSQIS
 from Archivo_to_excel import encolar_registro, actualizar_status_masivo, sincronizar_pendientes_excel
 from sql_storage import is_sql_enabled, get_processed_claim_keys_sql
+from utils import calcular_score_adjuntos
 
 # Configurar la tabla SQL
 os.environ["SQL_DATABASE"] = SQL_DATABASE
@@ -510,6 +511,9 @@ def main():
                 # 9. Seleccionar ponderaciones según PC o FW normal
                 pond = PONDERACIONES_STD_SF_PC if es_pc else PONDERACIONES_STD_SF
 
+                # 10. Calcular scores de adjuntos con Opción C (max keywords e IA)
+                adj_scores = calcular_score_adjuntos(clasif, pond, tr_result, plm_result, photo_result)
+
                 registro_nuevo = {
                     "ClaimNumber": Diccionario_Salesforce_Reclamo.get("Name"),
                     "Plataforma": "Salesforce",
@@ -525,20 +529,16 @@ def main():
                     "Repair deadline reason": DiccionarioValidacionSTD.get("Repair_deadline_reason"),
                     "Claim deadline": DiccionarioValidacionSTD.get("Claim_Deadline_ponderacion"),
                     "Claim deadline reason": DiccionarioValidacionSTD.get("Claim_Deadline_reason"),
-                    "Attachments PLM": plm_result["score"],
-                    "Attachments PLM reason": plm_result["reason"],
-                    "Attachments Oil Analysis": (
-                        pond["analisis_aceite"] if clasif["analisis_aceite"] else 0
-                    ),
-                    "Attachments Oil Analysis reason": ", ".join(clasif["analisis_aceite"]) or "No encontrado",
-                    "Attachments Datapacks": (
-                        pond["datapacks"] if clasif["datapacks"] else 0
-                    ),
-                    "Attachments Datapacks reason": ", ".join(clasif["datapacks"]) or "No encontrado",
-                    "Attachments Technical Report SF": tr_result["score"],
-                    "Attachments Technical Report SF reason": tr_result["reason"],
-                    "Attachments Photographs SF": photo_result["score"],
-                    "Attachments Photographs SF reason": photo_result["reason"],
+                    "Attachments PLM": adj_scores["score_plm"],
+                    "Attachments PLM reason": adj_scores["plm_reason"],
+                    "Attachments Oil Analysis": adj_scores["score_aceite"],
+                    "Attachments Oil Analysis reason": adj_scores["aceite_reason"],
+                    "Attachments Datapacks": adj_scores["score_datapacks"],
+                    "Attachments Datapacks reason": adj_scores["datapacks_reason"],
+                    "Attachments Technical Report SF": adj_scores["score_tr"],
+                    "Attachments Technical Report SF reason": adj_scores["tr_reason"],
+                    "Attachments Photographs SF": adj_scores["score_photos"],
+                    "Attachments Photographs SF reason": adj_scores["photos_reason"],
                     "Total Adjuntos": adjuntos_validacion["total_adjuntos"],
                     "Adjuntos en Claim": adjuntos_validacion["adjuntos_en_claim"],
                     "Adjuntos en Case": adjuntos_validacion["adjuntos_en_case"],

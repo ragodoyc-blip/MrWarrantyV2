@@ -471,8 +471,16 @@ def extraer_fecha_instalacion_parte(dict_claim: dict, dict_tsi: dict) -> dict:
     ]
 
     try:
-        resultado = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=1.0, parse_mode="clasificacion")
-        return resultado
+        client = OpenAI(base_url=AZURE_OPENAI_ENDPOINT, api_key=AZURE_OPENAI_KEY)
+        response = client.chat.completions.create(
+            messages=messages, max_tokens=500, temperature=0.0, top_p=1.0, model="gpt-4.1",
+        )
+        texto = response.choices[0].message.content.strip()
+        import ast
+        parsed = ast.literal_eval(texto)
+        if isinstance(parsed, dict) and "fecha" in parsed:
+            return parsed
+        return {"fecha": None, "confianza": 0.0, "razon": "Formato inesperado de la IA"}
     except Exception as e:
         return {"fecha": None, "confianza": 0.0, "razon": f"Error IA: {e}"}
 

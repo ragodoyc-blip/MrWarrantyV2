@@ -269,7 +269,10 @@ def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
             "product lifecycle", "part number", "pn ",
         ],
         "analisis_aceite": ["oil analysis", "analisis de aceite", "oil leakage", "oil sample", "oil test"],
-        "datapacks": ["dsc_", "datapack", "dsc", "haulcycle", "alarmfile", "im2", "komtrax"],
+        "datapacks": [
+            "dsc_", "datapack", "dsc", "haulcycle", "alarmfile", "im2", "komtrax",
+            "data ", "data_", "vhms", "vims", "vids", "ge_", "plm_ht", "komtrax",
+        ],
         "reporte_tecnico": [
             "technical report", "reporte tecnico", "failure analysis",
             "analisis de falla", "repair", "reparacion", "flash report",
