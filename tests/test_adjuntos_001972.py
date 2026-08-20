@@ -2,7 +2,7 @@
 Búsqueda completa de adjuntos para claim 001972.
 """
 
-from API_Salesforce import connect_salesforce
+from mr_warranty.adapters.salesforce_client import connect_salesforce
 
 
 def buscar_adjuntos_completo(claim_number: str):

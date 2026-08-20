@@ -5,10 +5,16 @@ from mr_warranty.core.logger import log
 from mr_warranty.core.ponderaciones import PONDERACIONES_STD
 import pandas as pd
 
-from mr_warranty.config.paths import REPO_ROOT
+import importlib.resources as _pkg_resources
 
-_STANRATE_PATH = REPO_ROOT / "StanRate.xlsx"
-stanrate = pd.read_excel(_STANRATE_PATH)
+try:
+    _stanrate_ref = _pkg_resources.files("mr_warranty.resources") / "StanRate.xlsx"
+    stanrate = pd.read_excel(str(_stanrate_ref))
+except Exception:
+    from mr_warranty.config.paths import REPO_ROOT as _fallback_root
+
+    _STANRATE_PATH = _fallback_root / "StanRate.xlsx"
+    stanrate = pd.read_excel(_STANRATE_PATH)
 
 within_standard_warranty = PONDERACIONES_STD.get("within_standard_warranty")
 repair_deadline = PONDERACIONES_STD.get("repair_deadline")

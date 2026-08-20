@@ -3,7 +3,7 @@ Prueba de conexión SQL y estructura de tablas.
 """
 
 import pyodbc
-from config import SQL_DRIVER, SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD
+from mr_warranty.config.config import SQL_DRIVER, SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD
 
 
 def get_connection_string():

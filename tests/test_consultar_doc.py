@@ -2,7 +2,7 @@
 Consulta un documento específico de ContentDocument.
 """
 
-from API_Salesforce import connect_salesforce
+from mr_warranty.adapters.salesforce_client import connect_salesforce
 
 
 def consultar_documento(doc_id: str):

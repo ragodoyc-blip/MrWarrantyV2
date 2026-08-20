@@ -2,7 +2,7 @@
 Prueba para verificar campos disponibles en el diccionario.
 """
 
-from API_Salesforce import process_salesforce_data
+from mr_warranty.adapters.salesforce_client import process_salesforce_data
 
 
 def test_campos(claim_number: str):

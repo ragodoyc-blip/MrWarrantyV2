@@ -4,9 +4,9 @@ Simula el flujo de main.py para Factory Warranty.
 """
 
 import json
-from API_Salesforce import process_salesforce_data, obtener_chatter_case_dict, validar_adjuntos_requeridos
-from ValidacionFC_SF import ValidacionStandard
-from Ponderaciones import PONDERACIONES_STD_SF
+from mr_warranty.adapters.salesforce_client import process_salesforce_data, obtener_chatter_case_dict, validar_adjuntos_requeridos
+from mr_warranty.domain.validation_fc_sf import ValidacionStandard
+from mr_warranty.core.ponderaciones import PONDERACIONES_STD_SF
 
 
 def test_integracion(claim_number: str):

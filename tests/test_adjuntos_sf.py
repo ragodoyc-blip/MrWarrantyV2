@@ -6,7 +6,7 @@ Ejemplo: python test_adjuntos_sf.py 002019
 
 import sys
 
-from API_Salesforce import connect_salesforce
+from mr_warranty.adapters.salesforce_client import connect_salesforce
 
 
 def test_adjuntos_case(claim_number: str):

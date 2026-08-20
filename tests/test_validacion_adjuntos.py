@@ -3,7 +3,7 @@ Prueba de las nuevas funciones de validación de adjuntos.
 """
 
 import json
-from API_Salesforce import connect_salesforce, validar_adjuntos_requeridos, buscar_adjuntos_sf, clasificar_adjuntos
+from mr_warranty.adapters.salesforce_client import connect_salesforce, validar_adjuntos_requeridos, buscar_adjuntos_sf, clasificar_adjuntos
 
 
 def test_completo(claim_number: str):

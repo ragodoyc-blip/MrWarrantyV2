@@ -3,7 +3,7 @@ Verifica los resultados en SQL.
 """
 
 import pyodbc
-from config import SQL_DRIVER, SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD
+from mr_warranty.config.config import SQL_DRIVER, SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD
 
 
 def verify_results():

@@ -5,7 +5,7 @@ Busca en ContentDocumentLink y también en Chatter.
 
 import sys
 
-from API_Salesforce import connect_salesforce
+from mr_warranty.adapters.salesforce_client import connect_salesforce
 
 
 def test_adjuntos_extendido(claim_number: str):

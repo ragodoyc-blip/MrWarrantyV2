@@ -24,6 +24,7 @@ Reclamos_Procesados_pendientes.jsonl
 # Archivos de datos
 Reclamos_Procesados.xlsx
 StanRate.xlsx
+!src/mr_warranty/resources/StanRate.xlsx
 
 # EdgeDriver
 edgedriver_win64/

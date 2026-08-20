@@ -3,7 +3,7 @@ Busqueda completa de adjuntos para caso 002019.
 Busca en Claim, Case (TSI) y Chatter.
 """
 
-from API_Salesforce import connect_salesforce
+from mr_warranty.adapters.salesforce_client import connect_salesforce
 
 
 def buscar_adjuntos_completo(claim_number: str):
