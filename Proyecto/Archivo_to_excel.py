@@ -64,16 +64,20 @@ def _clave_reclamo(datos_dict):
 def encolar_registro(datos_dict):
     """Guarda un reclamo en SQL y usa JSONL solo como respaldo transitorio."""
     if not is_sql_enabled():
-        log.info("SQL deshabilitado. Encolando en JSON.")
+        claim, plataforma = _clave_reclamo(datos_dict)
+        log.info("[JSON FALLBACK] %s | %s: SQL deshabilitado.", claim, plataforma)
         _guardar_en_pendientes(datos_dict)
         return False
 
     try:
         bulk_upsert_reclamos([datos_dict])
+        claim, plataforma = _clave_reclamo(datos_dict)
+        log.info("[SQL OK] %s | %s guardado inmediatamente.", claim, plataforma)
         return True
     except Exception as e:
         _guardar_en_pendientes(datos_dict)
-        log.error("Error al guardar en SQL, se encola en JSON: %s", e)
+        claim, plataforma = _clave_reclamo(datos_dict)
+        log.error("[SQL FALLBACK] %s | %s se encola en JSON: %s", claim, plataforma, e)
         return False
 
 
@@ -98,14 +102,25 @@ def sincronizar_pendientes_excel():
 
     pendientes_lote = list(dedup.values()) + pendientes_sin_clave
 
-    try:
-        sincronizados = bulk_upsert_reclamos(pendientes_lote)
-        _escribir_pendientes([])
-        log.info("Pendientes sincronizados a SQL: %d", sincronizados)
-        return sincronizados
-    except Exception as e:
-        log.error("Error al sincronizar pendientes a SQL: %s (pendientes: %d)", e, len(pendientes_lote))
-        return 0
+    sincronizados = 0
+    pendientes_restantes = []
+    for item in pendientes_lote:
+        claim, plataforma = _clave_reclamo(item)
+        try:
+            bulk_upsert_reclamos([item])
+            sincronizados += 1
+            log.info("[PENDIENTE SQL OK] %s | %s", claim, plataforma)
+        except Exception as e:
+            pendientes_restantes.append(item)
+            log.error("[PENDIENTE SQL ERROR] %s | %s: %s", claim, plataforma, e)
+
+    _escribir_pendientes(pendientes_restantes)
+    log.info(
+        "Pendientes sincronizados a SQL: %d; pendientes restantes: %d",
+        sincronizados,
+        len(pendientes_restantes),
+    )
+    return sincronizados
 
 
 def actualizar_status_masivo(status_por_reclamo):

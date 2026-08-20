@@ -17,6 +17,7 @@ from azure.storage.blob import (
 from datetime import datetime, timedelta
 
 from config import (
+    ADJUNTOS_DIR,
     AZURE_STORAGE_CONNECTION_STRING,
     AZURE_STORAGE_CONTAINER,
     POPPLER_PATH,
@@ -44,6 +45,29 @@ def generar_sas(blob_name: str) -> str:
     return f"{blob_client.url}?{sas_token}"
 
 
+def obtener_urls_blob_existentes(
+    blob_folder: str,
+    filename_prefix: str | None = None,
+) -> list[str]:
+    """Retorna SAS URLs de imágenes existentes sin volver a subirlas."""
+    prefix = f"{blob_folder.strip('/')}/"
+    try:
+        blob_names = []
+        for blob in _container_client.list_blobs(name_starts_with=prefix):
+            name = blob.name
+            filename = name.rsplit("/", 1)[-1]
+            if not filename.lower().endswith((".png", ".jpg", ".jpeg")):
+                continue
+            if filename_prefix and not filename.startswith(filename_prefix):
+                continue
+            blob_names.append(name)
+
+        return [generar_sas(name) for name in sorted(blob_names)]
+    except Exception as e:
+        log.warning("No se pudieron consultar blobs existentes en %s: %s", blob_folder, e)
+        return []
+
+
 def subir_imagenes_blob(document_folder: str, local_folder: str) -> list[str]:
     """Sube todas las imágenes al Blob y retorna URLs SAS válidas por 30 minutos."""
     urls = []
@@ -63,7 +87,8 @@ def subir_imagenes_blob(document_folder: str, local_folder: str) -> list[str]:
 
 def reconstruir_urls_existentes(download_path: str) -> dict[str, list[str]]:
     documentos_urls = {}
-    id_claim = download_path.split("/")[-1]
+    # Path.name funciona con rutas Windows y evita incluir "AdjuntosSQIS\\" en el Blob.
+    id_claim = Path(download_path).name
 
     for carpeta in sorted(os.listdir(download_path)):
         carpeta_path = os.path.join(download_path, carpeta)
@@ -117,7 +142,7 @@ def pdf_to_imagenes(pdf_file_path: str, output_folder: str) -> list[str]:
 
 def AdjuntosSQIS(ID_CLAIM: str) -> dict[str, list[str]]:
     """Descarga los adjuntos asociados a un caso y retorna URLs SAS por documento."""
-    download_path = str(Path("AdjuntosSQIS") / ID_CLAIM)
+    download_path = str(ADJUNTOS_DIR / ID_CLAIM)
 
     if os.path.exists(download_path) and len(os.listdir(download_path)) > 0:
         log.info("Carpeta ya existe para %s, saltando descarga...", ID_CLAIM)
@@ -140,9 +165,9 @@ def AdjuntosSQIS(ID_CLAIM: str) -> dict[str, list[str]]:
         os.makedirs(local_doc_path, exist_ok=True)
 
         try:
-            original_filename = os.path.basename(url.split("?")[0])
-            _, file_extension = os.path.splitext(original_filename)
-            base_name = original_filename[:20] if len(original_filename) > 20 else original_filename
+            source_filename = os.path.basename(url.split("?")[0])
+            base_name, file_extension = os.path.splitext(source_filename)
+            base_name = base_name[:20]
             original_filename = f"{base_name}{file_extension}"
 
             local_file = os.path.join(local_doc_path, original_filename)

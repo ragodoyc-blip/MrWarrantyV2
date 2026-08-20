@@ -35,11 +35,41 @@ def safe_parse_dict(texto, max_ponderacion):
     if "score" not in parsed or "reason" not in parsed:
         raise ValueError(f"Diccionario no contiene claves esperadas ('score', 'reason'): {parsed}")
 
-    # Validar que el score no exceda la ponderación máxima
-    if parsed["score"] > max_ponderacion:
-        raise ValueError(f"El score ({parsed['score']}) excede la ponderación máxima permitida ({max_ponderacion}).")
+    # Algunos modelos devuelven una proporción 0..1 en lugar del valor ponderado.
+    # Convertirla evita descartar una evaluación válida por escala incorrecta.
+    try:
+        score = float(parsed["score"])
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"El score no es numérico: {parsed['score']}") from e
+
+    if score < 0:
+        raise ValueError(f"El score ({score}) no puede ser negativo.")
+    if score > max_ponderacion:
+        if 0 <= score <= 1:
+            parsed["score"] = round(score * max_ponderacion, 6)
+            parsed["reason"] = f"PARCIAL: Escala IA normalizada. {parsed['reason']}"
+        else:
+            raise ValueError(f"El score ({score}) excede la ponderación máxima permitida ({max_ponderacion}).")
+    else:
+        parsed["score"] = score
 
     return parsed
+
+
+def score_from_criteria(result: dict, max_score: float, criteria_keys: list[str]) -> dict:
+    """Calcula el puntaje desde criterios booleanos devueltos por la IA."""
+    criteria = result.get("criteria")
+    if not isinstance(criteria, dict):
+        return result
+
+    def is_true(value) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"true", "yes", "si", "sí", "1", "ok"}
+
+    fulfilled = sum(is_true(criteria.get(key)) for key in criteria_keys)
+    result["score"] = round(max_score * fulfilled / len(criteria_keys), 6)
+    return result
 
 
 # -------------------------------------------------------------
@@ -363,6 +393,7 @@ def validar_adjunto_con_ia(
     serial: str,
     tipo_adjunto: str,
     ponderacion: float,
+    claim_context: dict | None = None,
 ) -> dict:
     """
     Envía imágenes del adjunto a Azure OpenAI para validar modelo y serial.
@@ -379,19 +410,80 @@ def validar_adjunto_con_ia(
         "Formato: {'score': <float>, 'reason': '<texto>'}"
     )
 
-    user_text = f"""
-    Analiza las imágenes del {tipo_adjunto} adjunto.
+    if tipo_adjunto.lower() in {"reporte técnico", "reporte tecnico", "technical report"} and claim_context:
+        user_text = f"""
+        Analiza las imágenes del informe técnico adjunto y compáralas con el Claim y el Case.
 
-    Datos esperados del Claim:
-    - Modelo: {modelo}
-    - Número de serie: {serial}
+        Datos esperados:
+        - Modelo: {modelo}
+        - Número de serie: {serial}
+        - Queja del Claim: {claim_context.get("complaint", "")}
+        - Causa del Claim: {claim_context.get("cause", "")}
+        - Corrección del Claim: {claim_context.get("correction", "")}
+        - Resumen del Claim: {claim_context.get("summary", "")}
+        - Descripción del Case: {claim_context.get("case_description", "")}
+        - Resolución del Case: {claim_context.get("case_resolution", "")}
 
-    Verifica que el documento contenga ambos datos.
+        Evalúa cinco criterios independientes:
+        1. El modelo coincide.
+        2. El número de serie coincide.
+        3. El componente reclamado aparece en el documento.
+        4. Las imágenes del informe evidencian la falla descrita.
+        5. Existen imágenes de antes y después de la reparación dentro del informe.
 
-    Si ambos coinciden: score = {ponderacion}, reason = 'OK'
-    Si falta uno o ninguno: score < {ponderacion}, reason explicando
-    Responde SOLO un diccionario Python válido.
-    """
+        Asigna score = {ponderacion} multiplicado por criterios cumplidos / 5.
+        Si existe una contradicción clara entre el informe y el Claim/Case, no otorgues ese criterio.
+        No supongas datos que no sean visibles o que no estén en el contexto.
+        Devuelve también criteria con estas claves booleanas exactas:
+        model_match, serial_match, component_match, failure_evidence, before_after.
+        El score debe ser el valor absoluto entre 0 y {ponderacion}.
+        Explica en reason qué criterios cumplieron, cuáles faltaron y cualquier contradicción.
+        Responde SOLO un diccionario Python válido.
+        """
+    elif tipo_adjunto.lower() == "plm" and claim_context:
+        user_text = f"""
+        Analiza las imágenes del PLM adjunto.
+
+        Datos esperados:
+        - Modelo: {modelo}
+        - Número de serie: {serial}
+        - Fecha de falla: {claim_context.get("failure_date", "")}
+        - Inicio del período válido: {claim_context.get("plm_period_start", "")}
+        - Fin del período válido: {claim_context.get("plm_period_end", "")}
+
+        Verifica tres criterios independientes:
+        1. El modelo coincide.
+        2. El número de serie coincide.
+        3. La información o fecha del PLM pertenece al período válido indicado.
+
+        El período válido es el último año antes de la falla. Si el equipo tiene menos de un año,
+        el período comienza en MachineCommissionedDate__c y termina en la fecha de falla.
+        Devuelve criteria con estas claves booleanas exactas:
+        model_match, serial_match, period_valid.
+        El score debe ser el valor absoluto entre 0 y {ponderacion}.
+        No supongas datos que no sean visibles.
+        Responde SOLO un diccionario Python válido.
+        """
+    else:
+        user_text = f"""
+        Analiza las imágenes del {tipo_adjunto} adjunto.
+
+        Datos esperados del Claim:
+        - Modelo: {modelo}
+        - Número de serie: {serial}
+
+        Evalúa dos criterios independientes:
+        1. El modelo coincide.
+        2. El número de serie coincide.
+
+        Asigna score = {ponderacion} multiplicado por criterios cumplidos / 2.
+        Devuelve también criteria con estas claves booleanas exactas:
+        model_match, serial_match.
+        El score debe ser el valor absoluto entre 0 y {ponderacion}.
+        Explica en reason qué dato coincide y cuál falta o no coincide.
+        No supongas datos que no sean visibles.
+        Responde SOLO un diccionario Python válido.
+        """
 
     urls_limitadas = seleccionar_imagenes_para_ia(urls_sas, max_images=10)
 
@@ -406,7 +498,78 @@ def validar_adjunto_con_ia(
         },
     ]
 
-    return call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=ponderacion)
+    result = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=ponderacion)
+    if tipo_adjunto.lower() in {"reporte técnico", "reporte tecnico", "technical report"} and claim_context:
+        return score_from_criteria(
+            result,
+            ponderacion,
+            ["model_match", "serial_match", "component_match", "failure_evidence", "before_after"],
+        )
+    if tipo_adjunto.lower() == "plm" and claim_context:
+        return score_from_criteria(
+            result,
+            ponderacion,
+            ["model_match", "serial_match", "period_valid"],
+        )
+    return score_from_criteria(result, ponderacion, ["model_match", "serial_match"])
+
+
+# =============================================================
+# 6b) Validar Oil Analysis con IA
+# =============================================================
+def validar_oil_analysis_con_ia(
+    urls_sas: list[str],
+    modelo: str,
+    serial: str,
+    component: str,
+    ponderacion: float,
+) -> dict:
+    """Valida máquina, serial y componente en un análisis de aceite."""
+    if not urls_sas:
+        return {"score": 0, "reason": "No se encontró Oil Analysis"}
+
+    from API_Salesforce import seleccionar_imagenes_para_ia
+
+    system = (
+        "Eres un analista técnico de Komatsu. "
+        "Debes responder SIEMPRE en formato diccionario Python. "
+        "Formato: {'score': <float>, 'reason': '<texto>'}"
+    )
+    user_text = f"""
+    Analiza las imágenes del Oil Analysis adjunto.
+
+    Datos esperados:
+    - Máquina/modelo: {modelo}
+    - Número de serie: {serial}
+    - Componente: {component}
+
+    Evalúa tres criterios independientes:
+    1. La máquina o modelo coincide.
+    2. El número de serie coincide.
+    3. El componente analizado coincide con el componente reclamado.
+
+    Asigna score = {ponderacion} multiplicado por criterios cumplidos / 3.
+    Devuelve también criteria con estas claves booleanas exactas:
+    machine_match, serial_match, component_match.
+    El score debe ser el valor absoluto entre 0 y {ponderacion}.
+    No supongas datos que no sean visibles. Explica coincidencias y faltantes.
+    Responde SOLO un diccionario Python válido.
+    """
+    messages = [
+        {"role": "system", "content": system},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_text},
+                *[
+                    {"type": "image_url", "image_url": {"url": url}}
+                    for url in seleccionar_imagenes_para_ia(urls_sas, max_images=10)
+                ],
+            ],
+        },
+    ]
+    result = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=ponderacion)
+    return score_from_criteria(result, ponderacion, ["machine_match", "serial_match", "component_match"])
 
 
 # =============================================================
@@ -505,6 +668,12 @@ def validar_work_order_con_ia(urls_sas: list[str], claim_data: dict) -> dict:
     )
 
     claim_name = claim_data.get("Name", "")
+    modelo = claim_data.get("Modelo", claim_data.get("modelo", "")) or ""
+    serial = claim_data.get("Serial", claim_data.get("serial", "")) or ""
+    work_order_number = claim_data.get("WorkOrderNumber", "") or ""
+    failure_date = claim_data.get("FailureDate__c", "") or ""
+    repair_date = claim_data.get("MachineRepairCompletionDate__c", "") or ""
+    component = claim_data.get("CausalPart__c", "") or claim_data.get("Product_Code__c", "") or ""
     complaint = claim_data.get("Complaint__c", "") or ""
     correction = claim_data.get("Correction__c", "") or ""
     summary = claim_data.get("Summary", "") or ""
@@ -517,14 +686,26 @@ def validar_work_order_con_ia(urls_sas: list[str], claim_data: dict) -> dict:
     - Correccion: {correction}
     - Resumen: {summary}
 
-    Verifica que:
-    1. Exista al menos un documento que sea Work Order / Service Order
-    2. El trabajo descrito en el Work Order tenga relacion con la queja y correccion del reclamo
-    3. Las fechas del Work Order sean coherentes con el reclamo
+    Datos técnicos esperados:
+    - Modelo: {modelo}
+    - Serial: {serial}
+    - Número de Work Order de referencia: {work_order_number}
+    - Componente: {component}
+    - Fecha de falla: {failure_date}
+    - Fecha de reparación: {repair_date}
 
-    Si existe Work Order y es relevante: score = 0.10, reason = 'OK'
-    Si existe pero no es relevante: score = 0.05, reason explicando
-    Si no existe Work Order: score = 0, reason = 'No se encontro Work Order'
+    Evalúa cinco criterios independientes:
+    1. Existe un número de Work Order legible y, si hay referencia, coincide.
+    2. La máquina y el serial coinciden.
+    3. La fecha del documento es legible y coherente con el reclamo.
+    4. El trabajo realizado está descrito claramente y se relaciona con la queja/corrección.
+    5. El componente intervenido coincide con el componente reclamado.
+
+    Asigna score = 0.10 multiplicado por criterios cumplidos / 6.
+    Devuelve también criteria con estas claves booleanas exactas:
+    work_order_number, machine_serial, date, work_performed, component_match, english.
+    El score debe ser el valor absoluto entre 0 y 0.10.
+    No supongas datos que no sean visibles. Explica criterios cumplidos, faltantes y contradicciones.
     Responde SOLO un diccionario Python válido.
     """
 
@@ -541,7 +722,12 @@ def validar_work_order_con_ia(urls_sas: list[str], claim_data: dict) -> dict:
         },
     ]
 
-    return call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=0.10)
+    result = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=0.10)
+    return score_from_criteria(
+        result,
+        0.10,
+        ["work_order_number", "machine_serial", "date", "work_performed", "component_match", "english"],
+    )
 
 
 # =============================================================
@@ -565,24 +751,35 @@ def validar_purchase_invoice_con_ia(urls_sas: list[str], claim_data: dict) -> di
 
     claim_name = claim_data.get("Name", "")
     causal_part = claim_data.get("CausalPart__c", "") or ""
-    parts_amount = claim_data.get("Parts_Requested_Amount__c", 0) or 0
+    product_code = claim_data.get("Product_Code__c", "") or ""
+    installation_date = claim_data.get("PartInstallationDate", "") or ""
+    claim_date = claim_data.get("CreatedDate", "") or ""
+    repair_date = claim_data.get("RepairDate", "") or claim_data.get("MachineRepairCompletionDate__c", "") or ""
+    quantity = claim_data.get("Parts_Requested_Quantity__c", 0) or claim_data.get("PartsRequiredQuantity", 0) or 0
 
     user_text = f"""
     Analiza las imagenes adjuntas buscando una FACTURA DE COMPRA del componente/parte.
 
     Informacion del Claim {claim_name}:
     - Parte causal: {causal_part}
-    - Monto reclamado: {parts_amount} USD
+    - Código de producto: {product_code}
+    - Fecha de instalación de la pieza: {installation_date}
+    - Fecha de reparación: {repair_date}
+    - Fecha del Claim: {claim_date}
+    - Cantidad reclamada: {quantity}
 
-    Verifica que:
-    1. Exista al menos un documento que sea Purchase Invoice / Factura de compra / Invoice
-    2. La factura sea del componente/parte que se esta reclamando
-    3. El monto de la factura sea coherente con el monto reclamado
-    4. La fecha de la factura sea anterior a la fecha del reclamo
+    Evalúa cinco criterios independientes:
+    1. El número de parte es legible.
+    2. La fecha de compra es legible.
+    3. La fecha de compra es anterior a la fecha de instalación/reemplazo y a la fecha de reparación.
+    4. La cantidad facturada es legible y coherente con la cantidad reclamada.
+    5. La pieza facturada se relaciona con la pieza instalada y reclamada.
 
-    Si existe factura y es relevante: score = 0.10, reason = 'OK'
-    Si existe pero no es relevante: score = 0.05, reason explicando
-    Si no existe factura: score = 0, reason = 'No se encontro factura de compra'
+    Asigna score = 0.10 multiplicado por criterios cumplidos / 5.
+    Devuelve también criteria con estas claves booleanas exactas:
+    part_number, purchase_date, before_installation_and_repair, quantity, installed_part_match.
+    El score debe ser el valor absoluto entre 0 y 0.10.
+    No supongas datos que no sean visibles. Explica criterios cumplidos, faltantes y contradicciones.
     Responde SOLO un diccionario Python válido.
     """
 
@@ -599,7 +796,12 @@ def validar_purchase_invoice_con_ia(urls_sas: list[str], claim_data: dict) -> di
         },
     ]
 
-    return call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=0.10)
+    result = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=0.10)
+    return score_from_criteria(
+        result,
+        0.10,
+        ["part_number", "purchase_date", "before_installation_and_repair", "quantity", "installed_part_match"],
+    )
 
 
 # =============================================================
@@ -612,7 +814,7 @@ def clasificar_documento_adjunto(
 ) -> dict:
     """
     Clasifica un adjunto de Salesforce leyendo su contenido con Azure OpenAI.
-    Categorias: reporte_tecnico, plm, fotografias, analisis_aceite, otro
+    Categorias: reporte_tecnico, plm, fotografias, analisis_aceite, work_order, purchase_invoice, otro
     """
     if not urls_sas:
         return {"categoria": "otro", "confianza": 0.0, "razon": "Sin URLs"}
@@ -632,6 +834,8 @@ def clasificar_documento_adjunto(
     - "plm": Payload Meter (documento que muestra peso/carga transportada por la maquina en toneladas)
     - "fotografias": Evidencia fotografica, fotos de la falla, reparacion, maquina funcionando, videos
     - "analisis_aceite": Oil analysis, analisis de aceite, muestra de lubricante, laboratorio de aceite
+    - "work_order": Work Order, Service Order, orden de trabajo, repair order
+    - "purchase_invoice": Purchase Invoice, factura de compra, invoice de una pieza
     - "otro": Facturas, ordenes de compra, work orders, certificados, cualquier otro documento
 
     Contexto del Claim:
@@ -639,7 +843,7 @@ def clasificar_documento_adjunto(
     - Numero de serie esperado: {serial_esperado}
 
     Responde SOLO un diccionario Python valido con:
-    - categoria: una de las 5 opciones
+    - categoria: una de las 7 opciones más "otro"
     - confianza: float entre 0.0 y 1.0
     - razon: explicacion breve (max 100 caracteres)
     """
@@ -669,6 +873,8 @@ def validar_photographs_con_ia(
     complaint: str,
     cause: str,
     ponderacion: float,
+    correction: str = "",
+    component: str = "",
 ) -> dict:
     """
     Valida que las fotografías correspondan a la queja y causa del reclamo.
@@ -691,10 +897,20 @@ def validar_photographs_con_ia(
     Información del Claim:
     - Queja: {complaint}
     - Causa: {cause}
+    - Corrección: {correction}
+    - Componente reclamado: {component}
 
-    Las fotografías deben evidenciar la falla mencionada en la queja.
-    Si están relacionadas: score = {ponderacion}, reason = 'OK'
-    Si no hay relación: score < {ponderacion}, reason explicando
+    Evalúa tres criterios independientes:
+    1. Las imágenes muestran realmente el componente reclamado.
+    2. Las imágenes evidencian la falla descrita.
+    3. Existen evidencias de antes y después de la reparación.
+
+    Asigna score = {ponderacion} multiplicado por criterios cumplidos / 3.
+    Si las imágenes son genéricas, ilegibles o no tienen relación, no otorgues ese criterio.
+    Devuelve también criteria con estas claves booleanas exactas:
+    component_match, failure_evidence, before_after.
+    El score debe ser el valor absoluto entre 0 y {ponderacion}.
+    Explica en reason qué criterios se cumplieron y cuáles faltaron.
     Responde SOLO un diccionario Python válido.
     """
 
@@ -711,4 +927,5 @@ def validar_photographs_con_ia(
         },
     ]
 
-    return call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=ponderacion)
+    result = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=ponderacion)
+    return score_from_criteria(result, ponderacion, ["component_match", "failure_evidence", "before_after"])

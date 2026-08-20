@@ -44,7 +44,10 @@ AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "
 AZURE_STORAGE_CONTAINER = os.getenv("AZURE_STORAGE_CONTAINER", "imagenes-sqis")
 
 # ── Poppler ─────────────────────────────────────────────────
-POPPLER_PATH = r"C:\Users\Komatsu\OneDrive - Komatsu Ltd\Documents\Proyectos\Mr. Warranty\Proyecto\ComplementosPoppler\Library\bin"
+POPPLER_PATH = os.getenv(
+    "POPPLER_PATH",
+    str(PROJECT_ROOT / "ComplementosPoppler" / "Library" / "bin"),
+).strip()
 
 # ── Warranty claim type GUIDs (Dynamics) ────────────────────
 WC_TYPE_FIELD_CAMPAIGN = "774b9a34-d872-ee11-9ae7-0022480a2abf"

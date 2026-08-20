@@ -96,6 +96,13 @@ SCORE_COLUMNS = {
     "attachments_photographs_sf",
 }
 
+DATE_COLUMNS = {
+    "createdon",
+    "submitted_date",
+    "repair_date",
+    "part_installation_date",
+}
+
 UPSERT_COLUMNS = [
     "claim_number",
     "plataforma",
@@ -153,8 +160,6 @@ UPSERT_COLUMNS = [
     "repair_date",
     "part_installation_date",
     "part_installation_date_reason",
-    "work_order",
-    "work_order_reason",
     "purchase_invoice",
     "purchase_invoice_reason",
     "raw_payload_json",
@@ -233,7 +238,7 @@ def _normalize_record(record):
         col = KEY_TO_DB_COLUMN.get(key)
         if col is None:
             continue
-        if col == "createdon":
+        if col in DATE_COLUMNS:
             normalized[col] = _to_datetime_or_none(value)
         elif col in SCORE_COLUMNS:
             normalized[col] = _to_float_or_none(value)
@@ -319,8 +324,6 @@ BEGIN
         repair_date DATETIMEOFFSET NULL,
         part_installation_date DATETIMEOFFSET NULL,
         part_installation_date_reason NVARCHAR(MAX) NULL,
-        work_order DECIMAL(10,4) NULL,
-        work_order_reason NVARCHAR(MAX) NULL,
         purchase_invoice DECIMAL(10,4) NULL,
         purchase_invoice_reason NVARCHAR(MAX) NULL,
         raw_payload_json NVARCHAR(MAX) NULL,

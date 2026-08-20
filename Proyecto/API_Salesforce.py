@@ -251,7 +251,7 @@ def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
     """
     Clasifica adjuntos por tipo basándose en el nombre del archivo.
     Retorna dict con listas de documentos encontrados por categoría.
-    Los Technical Reports siempre se cuentan también como fotografías.
+    Los Technical Reports y las fotografías se mantienen como categorías separadas.
     """
     classifications = {
         "plm": [],
@@ -259,6 +259,8 @@ def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
         "datapacks": [],
         "reporte_tecnico": [],
         "fotografias": [],
+        "work_order": [],
+        "purchase_invoice": [],
     }
 
     keywords = {
@@ -284,6 +286,13 @@ def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
             "foto", "photo", "imagen", "image", "picture", "evidencia",
             "img_", "screenshot", "captura", "video", "avi", "mp4",
             "ht", "before", "after", "installation", "evidencia", "pic",
+        ],
+        "work_order": [
+            "work order", "workorder", "service order", "orden de trabajo",
+            "repair order", "ro_", "ro-", "job card",
+        ],
+        "purchase_invoice": [
+            "purchase invoice", "invoice", "factura", "purchase", "bill",
         ],
     }
 
@@ -313,11 +322,6 @@ def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
             if es_video_o_imagen:
                 classifications["fotografias"].append(adj["title"])
 
-        # Si es reporte técnico, también contar como fotografía
-        # (los reportes técnicos deben incluir fotos)
-        if es_reporte_tecnico and adj["title"] not in classifications["fotografias"]:
-            classifications["fotografias"].append(adj["title"])
-
     return classifications
 
 
@@ -325,6 +329,7 @@ def validar_adjuntos_requeridos(
     claim_id: str,
     tsi_id: str | None,
     claim_data: dict | None = None,
+    es_pc: bool = False,
 ) -> dict:
     """
     Valida la presencia de documentos requeridos en un claim de Salesforce.
@@ -347,6 +352,14 @@ def validar_adjuntos_requeridos(
 
     # Clasificar con keywords primero
     classifications = clasificar_adjuntos(adjuntos_combinados)
+    classification_details = {}
+    for adj in adjuntos_combinados:
+        categories = [
+            category
+            for category, titles in classifications.items()
+            if adj["title"] in titles
+        ]
+        classification_details[adj["id"]] = {"categories": categories}
 
     # Detectar adjuntos no clasificados (excluyendo datapacks que ya estan OK)
     titles_clasificados = set()
@@ -384,26 +397,33 @@ def validar_adjuntos_requeridos(
             if cat in classifications and cat != "otro":
                 if adj["title"] not in classifications[cat]:
                     classifications[cat].append(adj["title"])
+                classification_details[adj["id"]] = {
+                    "categories": [cat],
+                    "blob_folder": resultado_ia.get("blob_folder"),
+                }
         except Exception as e:
             log.error(f"Error clasificando con IA: {e}")
 
-    # Si es reporte_tecnico, tambien contar como fotografia
-    for tr_title in classifications["reporte_tecnico"]:
-        if tr_title not in classifications["fotografias"]:
-            classifications["fotografias"].append(tr_title)
-
-    # Calcular score
-    total_required = 5
-    found = sum(1 for docs in classifications.values() if docs)
+    # Todos los Factory Warranty requieren estas categorías para su evaluación.
+    required_categories = [
+        "plm",
+        "analisis_aceite",
+        "datapacks",
+        "reporte_tecnico",
+    ]
+    required_categories.extend(["work_order", "purchase_invoice"])
+    total_required = len(required_categories)
+    found = sum(1 for category in required_categories if classifications.get(category))
 
     return {
         "total_adjuntos": len(adjuntos_combinados),
         "adjuntos_en_claim": len(adjuntos_claim),
         "adjuntos_en_case": len(adjuntos_case),
         "clasificacion": classifications,
+        "classification_details": classification_details,
         "documentos_encontrados": found,
         "documentos_requeridos": total_required,
-        "faltantes": [tipo for tipo, docs in classifications.items() if not docs],
+        "faltantes": [tipo for tipo in required_categories if not classifications.get(tipo)],
     }
 
 
@@ -476,13 +496,19 @@ def obtener_modelo_serial_tsi(tsi_id: str) -> dict:
 def descargar_y_subir_adjuntos_ia(
     claim_id: str,
     tsi_id: str | None,
-    categorias: list[str]
+    categorias: list[str],
+    classifications: dict | None = None,
+    attachment_details: dict | None = None,
 ) -> dict:
     """
     Descarga adjuntos de las categorías especificadas, convierte PDFs a PNG,
     sube a Azure Blob y retorna URLs SAS para enviar a Azure OpenAI.
     """
-    from Adjuntos_SQIS import pdf_to_imagenes, subir_imagenes_blob
+    from Adjuntos_SQIS import (
+        obtener_urls_blob_existentes,
+        pdf_to_imagenes,
+        subir_imagenes_blob,
+    )
 
     adjuntos_claim = buscar_adjuntos_sf(claim_id)
     adjuntos_case = buscar_adjuntos_sf(tsi_id) if tsi_id else []
@@ -494,9 +520,18 @@ def descargar_y_subir_adjuntos_ia(
             adjuntos_combinados.append(adj)
             ids_vistos.add(adj["id"])
 
-    classifications = clasificar_adjuntos(adjuntos_combinados)
+    classifications = classifications or clasificar_adjuntos(adjuntos_combinados)
 
     resultado = {}
+    attachment_details = attachment_details or {}
+    blob_urls_cache = {}
+
+    def urls_cached(folder: str, filename_prefix: str | None = None) -> list[str]:
+        cache_key = (folder, filename_prefix)
+        if cache_key not in blob_urls_cache:
+            blob_urls_cache[cache_key] = obtener_urls_blob_existentes(folder, filename_prefix)
+        return blob_urls_cache[cache_key]
+
     for categoria in categorias:
         docs_titulos = classifications.get(categoria, [])
         urls_sas_categoria = []
@@ -509,6 +544,27 @@ def descargar_y_subir_adjuntos_ia(
             doc_id = adj["id"]
             titulo = adj["title"]
             file_type = adj["file_type"]
+
+            detail = attachment_details.get(doc_id, {})
+            classification_folder = detail.get("blob_folder")
+            if classification_folder:
+                classification_urls = urls_cached(classification_folder)
+                if classification_urls:
+                    urls_sas_categoria.extend(classification_urls)
+                    titulos_categoria.append(titulo)
+                    continue
+
+            blob_folder = f"AdjuntosSF/{claim_id}/{categoria}/{doc_id}"
+            urls = urls_cached(blob_folder)
+            if not urls:
+                legacy_folder = f"AdjuntosSF/{claim_id}/{categoria}"
+                legacy_prefix = re.sub(r"[^a-zA-Z0-9_\-]", "_", titulo)[:20]
+                urls = urls_cached(legacy_folder, legacy_prefix)
+            if urls:
+                urls_sas_categoria.extend(urls)
+                titulos_categoria.append(titulo)
+                log.info("[BLOB CACHE] Reutilizando %s (%s)", titulo, categoria)
+                continue
 
             cv_id = obtener_content_version_id(doc_id)
             if not cv_id:
@@ -531,7 +587,6 @@ def descargar_y_subir_adjuntos_ia(
                 else:
                     png_files = [local_file]
 
-                blob_folder = f"AdjuntosSF/{claim_id}/{categoria}"
                 urls = subir_imagenes_blob(blob_folder, tmp_dir)
                 urls_sas_categoria.extend(urls)
                 titulos_categoria.append(titulo)
@@ -624,7 +679,9 @@ def clasificar_adjunto_con_ia(adjunto: dict, claim_data: dict | None = None) -> 
     from Promps import clasificar_documento_adjunto
     from cache_clasificacion import get_clasificacion_cache, save_clasificacion_cache
 
-    cached = get_clasificacion_cache(adjunto["id"])
+    # La taxonomía incluye Work Order e Invoice; no reutilizar clasificaciones antiguas.
+    cache_key = f"v2:{adjunto['id']}"
+    cached = get_clasificacion_cache(cache_key)
     if cached:
         log.info(f"[CACHE] {adjunto['title']}: {cached.get('categoria')} (confianza={cached.get('confianza', 0):.2f})")
         return cached
@@ -669,7 +726,8 @@ def clasificar_adjunto_con_ia(adjunto: dict, claim_data: dict | None = None) -> 
         log.error(f"Error en clasificacion IA: {e}")
         return {"categoria": "otro", "confianza": 0.0, "razon": f"Error IA: {e}"}
 
-    save_clasificacion_cache(adjunto["id"], resultado)
+    resultado["blob_folder"] = blob_folder
+    save_clasificacion_cache(cache_key, resultado)
 
     confianza = resultado.get("confianza", 0)
     if confianza >= 0.7:
@@ -678,4 +736,3 @@ def clasificar_adjunto_con_ia(adjunto: dict, claim_data: dict | None = None) -> 
         log.warning(f"[IA BAJA] {adjunto['title']}: {resultado.get('categoria')} (confianza={confianza:.2f}) - {resultado.get('razon', '')}")
 
     return resultado
-

@@ -57,8 +57,6 @@ BEGIN
         repair_date DATETIMEOFFSET NULL,
         part_installation_date DATETIMEOFFSET NULL,
         part_installation_date_reason NVARCHAR(MAX) NULL,
-        work_order DECIMAL(10,4) NULL,
-        work_order_reason NVARCHAR(MAX) NULL,
         purchase_invoice DECIMAL(10,4) NULL,
         purchase_invoice_reason NVARCHAR(MAX) NULL,
         raw_payload_json NVARCHAR(MAX) NULL,
