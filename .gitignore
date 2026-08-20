@@ -16,6 +16,7 @@ __pycache__/
 
 # Datos generados
 AdjuntosSQIS/
+AdjuntosSF/
 *.log
 tablas_salesforce.json
 Reclamos_Procesados_pendientes.jsonl
