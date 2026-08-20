@@ -100,12 +100,6 @@ def seleccionar_imagenes_para_ia(urls_sas: list[str], max_images: int = 10) -> l
     return seleccionadas[:max_images]
 
 
-def max_score_with_reason(score_kw: float, reason_kw: str, score_ia: float, reason_ia: str) -> tuple:  # deprecated, mantener por compatibilidad historica, retorna max
-    if score_ia > score_kw:
-        return score_ia, reason_ia
-    return score_kw, reason_kw
-
-
 def calcular_score_adjuntos(
     clasif: dict,
     pond: dict,
