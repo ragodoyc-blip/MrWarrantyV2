@@ -1,9 +1,9 @@
-from API_SQIS import getWarrantyclaimid, getwarrantyclaim, getwarrantyclaimdetails
-from API_SQIS_FC import get_fc_master, get_service_news, Partes_presentes
-from config import SQIS_DETAIL_TYPE_FOC
-from logger import log
-from Ponderaciones import PONDERACIONES_FC
-from utils import parse_datetime
+from mr_warranty.adapters.sqis_client import getWarrantyclaimid, getwarrantyclaim, getwarrantyclaimdetails
+from mr_warranty.adapters.sqis_fc_client import get_fc_master, get_service_news, Partes_presentes
+from mr_warranty.config.config import SQIS_DETAIL_TYPE_FOC
+from mr_warranty.core.logger import log
+from mr_warranty.core.ponderaciones import PONDERACIONES_FC
+from mr_warranty.core.utils import parse_datetime
 
 FC_expiration = PONDERACIONES_FC.get("fc_expiration")
 Repair_deadline = PONDERACIONES_FC.get("repair_deadline")

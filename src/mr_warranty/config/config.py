@@ -3,13 +3,23 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from mr_warranty.config.paths import ADJUNTOS_DIR as _ADJUNTOS_DIR
+from mr_warranty.config.paths import DATA_DIR as _DATA_DIR
+from mr_warranty.config.paths import LOGS_DIR as _LOGS_DIR
+from mr_warranty.config.paths import POPPLER_DEFAULT as _POPPLER_DEFAULT
+from mr_warranty.config.paths import REPO_ROOT as _REPO_ROOT
+
+# Carga .env desde Proyecto/.env y también desde repo root si existe
 load_dotenv(Path(__file__).resolve().parent / ".env")
+load_dotenv(_REPO_ROOT / "Proyecto" / ".env")
+load_dotenv(_REPO_ROOT / ".env")
 
 # ── Base paths ──────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parent
-DATA_DIR = PROJECT_ROOT / "Datos"
-LOGS_DIR = PROJECT_ROOT / "logs"
-ADJUNTOS_DIR = PROJECT_ROOT.parent / "AdjuntosSQIS"
+PROJECT_ROOT = _REPO_ROOT / "Proyecto"
+DATA_DIR = _DATA_DIR
+LOGS_DIR = _LOGS_DIR
+ADJUNTOS_DIR = _ADJUNTOS_DIR
+REPO_ROOT = _REPO_ROOT
 
 # ── Dynamics 365 (SQIS) ────────────────────────────────────
 DYNAMICS_API_URL = "https://komatsuna.api.crm.dynamics.com/api/data/v9.2"
@@ -46,7 +56,7 @@ AZURE_STORAGE_CONTAINER = os.getenv("AZURE_STORAGE_CONTAINER", "imagenes-sqis")
 # ── Poppler ─────────────────────────────────────────────────
 POPPLER_PATH = os.getenv(
     "POPPLER_PATH",
-    str(PROJECT_ROOT / "ComplementosPoppler" / "Library" / "bin"),
+    str(_POPPLER_DEFAULT),
 ).strip()
 
 # ── Warranty claim type GUIDs (Dynamics) ────────────────────

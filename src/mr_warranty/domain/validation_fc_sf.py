@@ -2,8 +2,8 @@ from datetime import timedelta
 
 import pandas as pd
 
-from Ponderaciones import PONDERACIONES_STD_SF, PONDERACIONES_FC_SF
-from utils import parse_datetime, strip_tz
+from mr_warranty.core.ponderaciones import PONDERACIONES_STD_SF, PONDERACIONES_FC_SF
+from mr_warranty.core.utils import parse_datetime, strip_tz
 
 # ── Ponderacion STD SF ──────────────────────────────────────
 _std_within_standard_warranty = PONDERACIONES_STD_SF.get("within_standard_warranty")

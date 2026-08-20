@@ -4,8 +4,8 @@ from datetime import datetime
 
 import pyodbc
 
-from config import SQL_DRIVER, SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD
-from logger import log
+from mr_warranty.config.config import SQL_DRIVER, SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD
+from mr_warranty.core.logger import log
 
 
 TABLE_NAME = "mr_warranty.reclamos_procesados"
@@ -167,7 +167,7 @@ UPSERT_COLUMNS = [
 
 
 def is_sql_enabled():
-    from config import SQL_ENABLED
+    from mr_warranty.config.config import SQL_ENABLED
     return SQL_ENABLED
 
 

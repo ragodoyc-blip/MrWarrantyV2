@@ -7,7 +7,7 @@ import pandas as pd
 import requests
 from simple_salesforce import Salesforce
 
-from config import (
+from mr_warranty.config.config import (
     SF_AUTH_URL,
     SF_CONSUMER_KEY,
     SF_CONSUMER_SECRET,
@@ -17,7 +17,7 @@ from config import (
     SF_USERNAME,
     ALLOWED_DISTRIBUTORS,
 )
-from logger import log
+from mr_warranty.core.logger import log
 
 # Cache de conexión Salesforce
 _sf_client: Salesforce | None = None
@@ -504,7 +504,7 @@ def descargar_y_subir_adjuntos_ia(
     Descarga adjuntos de las categorías especificadas, convierte PDFs a PNG,
     sube a Azure Blob y retorna URLs SAS para enviar a Azure OpenAI.
     """
-    from Adjuntos_SQIS import (
+    from mr_warranty.infrastructure.blob import (
         obtener_urls_blob_existentes,
         pdf_to_imagenes,
         subir_imagenes_blob,
@@ -642,7 +642,7 @@ def obtener_coverage_type(claim_id: str) -> dict:
 
 def seleccionar_imagenes_para_ia(urls_sas: list[str], max_images: int = 10) -> list[str]:
     """Wrapper compatibilidad - delega a utils.seleccionar_imagenes_para_ia."""
-    from utils import seleccionar_imagenes_para_ia as _core_sel
+    from mr_warranty.core.utils import seleccionar_imagenes_para_ia as _core_sel
     return _core_sel(urls_sas, max_images=max_images)
 
 
@@ -657,9 +657,9 @@ def clasificar_adjunto_con_ia(adjunto: dict, claim_data: dict | None = None) -> 
         "razon": "..."
     }
     """
-    from Adjuntos_SQIS import pdf_to_imagenes, subir_imagenes_blob
-    from Promps import clasificar_documento_adjunto
-    from cache_clasificacion import get_clasificacion_cache, save_clasificacion_cache
+    from mr_warranty.infrastructure.blob import pdf_to_imagenes, subir_imagenes_blob
+    from mr_warranty.services.prompts import clasificar_documento_adjunto
+    from mr_warranty.infrastructure.cache import get_clasificacion_cache, save_clasificacion_cache
 
     # La taxonomía incluye Work Order e Invoice; no reutilizar clasificaciones antiguas.
     cache_key = f"v2:{adjunto['id']}"

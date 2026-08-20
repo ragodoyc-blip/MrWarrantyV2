@@ -3,9 +3,9 @@ import time
 
 from openai import OpenAI
 
-from config import AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY
-from logger import log
-from Ponderaciones import PONDERACIONES_STD, PONDERACIONES_FC, Ajuste_Parts, PONDERACIONES_STD_SF
+from mr_warranty.config.config import AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY
+from mr_warranty.core.logger import log
+from mr_warranty.core.ponderaciones import PONDERACIONES_STD, PONDERACIONES_FC, Ajuste_Parts, PONDERACIONES_STD_SF
 
 # -------------------------------------------------------------
 # Utilidad universal: parsea string → dict de forma segura
@@ -399,7 +399,7 @@ def validar_adjunto_con_ia(
     Envía imágenes del adjunto a Azure OpenAI para validar modelo y serial.
     Primera imagen = portada, luego hasta 9 adicionales.
     """
-    from utils import seleccionar_imagenes_para_ia
+    from mr_warranty.core.utils import seleccionar_imagenes_para_ia
 
     if not urls_sas:
         return {"score": 0, "reason": f"No se encontró {tipo_adjunto}"}
@@ -528,7 +528,7 @@ def validar_oil_analysis_con_ia(
     if not urls_sas:
         return {"score": 0, "reason": "No se encontró Oil Analysis"}
 
-    from utils import seleccionar_imagenes_para_ia
+    from mr_warranty.core.utils import seleccionar_imagenes_para_ia
 
     system = (
         "Eres un analista técnico de Komatsu. "
@@ -659,7 +659,7 @@ def validar_work_order_con_ia(urls_sas: list[str], claim_data: dict) -> dict:
     if not urls_sas:
         return {"score": 0, "reason": "No hay documentos adjuntos para validar Work Order"}
 
-    from utils import seleccionar_imagenes_para_ia
+    from mr_warranty.core.utils import seleccionar_imagenes_para_ia
 
     system = (
         "Eres un analista tecnico de Komatsu. "
@@ -741,7 +741,7 @@ def validar_purchase_invoice_con_ia(urls_sas: list[str], claim_data: dict) -> di
     if not urls_sas:
         return {"score": 0, "reason": "No hay documentos adjuntos para validar Purchase Invoice"}
 
-    from utils import seleccionar_imagenes_para_ia
+    from mr_warranty.core.utils import seleccionar_imagenes_para_ia
 
     system = (
         "Eres un analista tecnico de Komatsu. "
@@ -819,7 +819,7 @@ def clasificar_documento_adjunto(
     if not urls_sas:
         return {"categoria": "otro", "confianza": 0.0, "razon": "Sin URLs"}
 
-    from utils import seleccionar_imagenes_para_ia
+    from mr_warranty.core.utils import seleccionar_imagenes_para_ia
 
     system = (
         "Eres un analista tecnico de Komatsu especializado en clasificacion de documentos. "
@@ -880,7 +880,7 @@ def validar_photographs_con_ia(
     Valida que las fotografías correspondan a la queja y causa del reclamo.
     Primera imagen = portada, luego hasta 9 adicionales.
     """
-    from utils import seleccionar_imagenes_para_ia
+    from mr_warranty.core.utils import seleccionar_imagenes_para_ia
 
     if not urls_sas:
         return {"score": 0, "reason": "No se encontraron fotografías"}

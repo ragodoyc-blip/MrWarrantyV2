@@ -9,9 +9,9 @@ Descripción:
 
 import pandas as pd
 
-from API_SQIS import _get_session
-from config import DYNAMICS_API_URL
-from logger import log
+from mr_warranty.adapters.sqis_client import _get_session
+from mr_warranty.config.config import DYNAMICS_API_URL
+from mr_warranty.core.logger import log
 
 
 def get_fc_master(fc_number: str) -> dict | None:

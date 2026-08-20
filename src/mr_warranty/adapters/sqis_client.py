@@ -1,9 +1,9 @@
 import pandas as pd
 import requests
 
-from config import DYNAMICS_API_URL
-from cookies import COOKIES
-from logger import log
+from mr_warranty.config.config import DYNAMICS_API_URL
+from mr_warranty.adapters.cookies import COOKIES
+from mr_warranty.core.logger import log
 
 # ── Sesión HTTP reutilizable para Dynamics 365 ──────────────
 _session: requests.Session | None = None

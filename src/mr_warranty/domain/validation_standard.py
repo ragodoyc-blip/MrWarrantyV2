@@ -1,11 +1,13 @@
-from API_SQIS import getWarrantyclaimid, getwarrantyclaim, getwarrantyclaimdetails, getkom_warrantyclaimworks
+from mr_warranty.adapters.sqis_client import getWarrantyclaimid, getwarrantyclaim, getwarrantyclaimdetails, getkom_warrantyclaimworks
 from datetime import datetime
 from pathlib import Path
-from logger import log
-from Ponderaciones import PONDERACIONES_STD
+from mr_warranty.core.logger import log
+from mr_warranty.core.ponderaciones import PONDERACIONES_STD
 import pandas as pd
 
-_STANRATE_PATH = Path(__file__).resolve().parent.parent / "StanRate.xlsx"
+from mr_warranty.config.paths import REPO_ROOT
+
+_STANRATE_PATH = REPO_ROOT / "StanRate.xlsx"
 stanrate = pd.read_excel(_STANRATE_PATH)
 
 within_standard_warranty = PONDERACIONES_STD.get("within_standard_warranty")
@@ -17,7 +19,7 @@ work_order = PONDERACIONES_STD.get("work_order")
 photographs = PONDERACIONES_STD.get("photographs")
 standard_rate = PONDERACIONES_STD.get("standard_rate")
 
-from utils import parse_datetime
+from mr_warranty.core.utils import parse_datetime
 
 
 def ValidacionStandadWC(RFNumber: str):

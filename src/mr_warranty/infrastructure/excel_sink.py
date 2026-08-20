@@ -1,8 +1,8 @@
 ﻿import json
 from pathlib import Path
 
-from logger import log
-from sql_storage import (
+from mr_warranty.core.logger import log
+from mr_warranty.infrastructure.sql_storage import (
     bulk_update_status_sql,
     bulk_upsert_reclamos,
     is_sql_enabled,

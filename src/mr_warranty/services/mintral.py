@@ -4,8 +4,8 @@ import time
 
 import requests
 
-from config import AZURE_MISTRAL_API_KEY, AZURE_MISTRAL_ENDPOINT
-from logger import log
+from mr_warranty.config.config import AZURE_MISTRAL_API_KEY, AZURE_MISTRAL_ENDPOINT
+from mr_warranty.core.logger import log
 
 
 def encode_pdf_to_base64(pdf_path: str) -> str | None:

@@ -3,7 +3,7 @@ import os
 
 import pandas as pd
 
-from config import (
+from mr_warranty.config.config import (
     SQL_TABLE,
     SQL_DATABASE,
     WC_TYPE_FIELD_CAMPAIGN,
@@ -12,9 +12,9 @@ from config import (
     SQIS_STATUS_UNDER_APPLICATION,
     DEFAULT_CREATEDON_FILTER,
 )
-from logger import log
+from mr_warranty.core.logger import log
 
-from Promps import (
+from mr_warranty.services.prompts import (
     InformeTecnico,
     OrdenTrabajo,
     facturas_promp,
@@ -26,16 +26,16 @@ from Promps import (
     validar_work_order_con_ia,
     validar_purchase_invoice_con_ia,
 )
-from ValidacionStandart import ValidacionStandadWC, ValidacionStandartPartes, Stanrate
-from ValidacionFC_SF import ValidacionFC_SF, ValidacionCostCoverage_SF, ValidacionStandard
-from ValidacionFC import (
+from mr_warranty.domain.validation_standard import ValidacionStandadWC, ValidacionStandartPartes, Stanrate
+from mr_warranty.domain.validation_fc_sf import ValidacionFC_SF, ValidacionCostCoverage_SF, ValidacionStandard
+from mr_warranty.domain.validation_fc import (
     DatosGeneralesCampana,
     ValidacionCampanaGeneral,
     ValidacionCampanaPartes,
     ValidacionCostCoverage,
 )
-from API_SQIS import Allgetwarrantyclaim, getWarrantyclaimid, get_offerstatus_labels
-from API_Salesforce import (
+from mr_warranty.adapters.sqis_client import Allgetwarrantyclaim, getWarrantyclaimid, get_offerstatus_labels
+from mr_warranty.adapters.salesforce_client import (
     process_salesforce_data,
     reclamos_pendientes,
     obtener_chatter_case_dict,
@@ -45,11 +45,11 @@ from API_Salesforce import (
     obtener_repair_date,
     obtener_coverage_type,
 )
-from Ponderaciones import PONDERACIONES_STD, PONDERACIONES_FC, PONDERACIONES_STD_SF, PONDERACIONES_STD_SF_PC
-from Adjuntos_SQIS import AdjuntosSQIS
-from Archivo_to_excel import encolar_registro, actualizar_status_masivo, sincronizar_pendientes_excel
-from sql_storage import is_sql_enabled, get_processed_claim_keys_sql
-from utils import (
+from mr_warranty.core.ponderaciones import PONDERACIONES_STD, PONDERACIONES_FC, PONDERACIONES_STD_SF, PONDERACIONES_STD_SF_PC
+from mr_warranty.infrastructure.blob import AdjuntosSQIS
+from mr_warranty.infrastructure.excel_sink import encolar_registro, actualizar_status_masivo, sincronizar_pendientes_excel
+from mr_warranty.infrastructure.sql_storage import is_sql_enabled, get_processed_claim_keys_sql
+from mr_warranty.core.utils import (
     calcular_periodo_plm,
     calcular_score_adjuntos,
     componente_usa_aceite_hidraulico,
@@ -57,7 +57,7 @@ from utils import (
 
 # Configurar la tabla SQL
 os.environ["SQL_DATABASE"] = SQL_DATABASE
-import sql_storage
+import mr_warranty.infrastructure.sql_storage as sql_storage
 sql_storage.TABLE_NAME = SQL_TABLE
 
 
@@ -163,9 +163,9 @@ def actualizar_estados_existentes():
     actualiza solo el status y submitted_date desde Salesforce.
     No re-analiza los adjuntos.
     """
-    from API_Salesforce import connect_salesforce
+    from mr_warranty.adapters.salesforce_client import connect_salesforce
     import pyodbc
-    from config import SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD, SQL_DRIVER
+    from mr_warranty.config.config import SQL_SERVER, SQL_DATABASE, SQL_USERNAME, SQL_PASSWORD, SQL_DRIVER
 
     sf = connect_salesforce()
 

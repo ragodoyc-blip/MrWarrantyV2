@@ -16,15 +16,15 @@ from azure.storage.blob import (
 )
 from datetime import datetime, timedelta
 
-from config import (
+from mr_warranty.config.config import (
     ADJUNTOS_DIR,
     AZURE_STORAGE_CONNECTION_STRING,
     AZURE_STORAGE_CONTAINER,
     POPPLER_PATH,
 )
-from logger import log
-from Procesador_Mintral import Ejecutar_Mistral_diccionario
-from API_SQIS import URL_Adjuntos
+from mr_warranty.core.logger import log
+from mr_warranty.services.mintral import Ejecutar_Mistral_diccionario
+from mr_warranty.adapters.sqis_client import URL_Adjuntos
 
 
 # ── Azure Blob Storage ──────────────────────────────────────

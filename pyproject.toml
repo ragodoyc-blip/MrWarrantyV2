@@ -1,0 +1,26 @@
+[project]
+name = "mr-warranty"
+version = "2.0.0"
+description = "Validación de reclamos Factory Warranty Salesforce/SQIS"
+requires-python = ">=3.11"
+dependencies = [
+  "pandas>=2.3",
+  "requests>=2.32",
+  "simple-salesforce>=1.12",
+  "pyodbc>=5.2",
+  "openai>=2.3",
+  "azure-storage-blob>=12.0",
+  "pdf2image>=1.17",
+  "python-dotenv>=1.1",
+  "openpyxl>=3.1",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "src"
