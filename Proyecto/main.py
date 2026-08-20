@@ -30,5 +30,28 @@ if __name__ == "__main__":
         default="ambos",
         help="Fuente a procesar (por defecto: ambos).",
     )
+    parser.add_argument(
+        "--dry-run",
+        type=int,
+        nargs="?",
+        const=1,
+        default=None,
+        dest="dry_run",
+        help="Dry-run: procesa N reclamos aleatorios por plataforma.",
+    )
+    parser.add_argument(
+        "--dry-run-seed",
+        type=str,
+        default=None,
+        help="Seed para muestreo reproducible.",
+    )
     args = parser.parse_args()
-    main(args.fuente)
+    if args.dry_run_seed is not None:
+        import os
+
+        os.environ["DRY_RUN_SEED"] = str(args.dry_run_seed)
+    if args.dry_run is not None:
+        import os
+
+        os.environ["DRY_RUN_LIMIT"] = str(args.dry_run)
+    main(args.fuente, dry_run_limit=args.dry_run)

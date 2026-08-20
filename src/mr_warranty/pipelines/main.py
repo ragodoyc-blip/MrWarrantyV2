@@ -81,8 +81,37 @@ def convertir_sas_dict_a_imagenes_con_paginacion(sas_dict: dict, max_imagenes: i
     return bloques
 
 
-def Analisis(fuente: str = "ambos"):
+def _resolve_dry_run_limit(explicit: int | None) -> tuple[int | None, str | None]:
+    """Resuelve límite dry-run desde parámetro o env DRY_RUN_LIMIT/DRY_RUN."""
+    if explicit is not None:
+        return explicit, os.getenv("DRY_RUN_SEED")
+    env = os.getenv("DRY_RUN_LIMIT")
+    if env is None:
+        env = os.getenv("DRY_RUN")
+    if env is None:
+        return None, None
+    env = env.strip()
+    if not env:
+        return None, None
+    if env.lower() in {"true", "yes", "y", "1"}:
+        return 1, os.getenv("DRY_RUN_SEED")
+    try:
+        return int(env), os.getenv("DRY_RUN_SEED")
+    except ValueError:
+        return 1, os.getenv("DRY_RUN_SEED")
+
+
+def Analisis(fuente: str = "ambos", dry_run_limit: int | None = None):
     """Analiza reclamos pendientes de la fuente seleccionada."""
+    import random
+
+    dry_run_limit, dry_run_seed = _resolve_dry_run_limit(dry_run_limit)
+    if dry_run_seed is not None:
+        try:
+            random.seed(int(dry_run_seed))
+        except ValueError:
+            random.seed(dry_run_seed)
+
     procesar_sqis = fuente in {"sqis", "ambos"}
     procesar_salesforce = fuente in {"salesforce", "ambos"}
 
@@ -143,6 +172,28 @@ def Analisis(fuente: str = "ambos"):
     df_candidatos_procesar = pd.concat([df_wc_pendiente, df_sf_procesar], ignore_index=True, sort=False)
 
     df_no_procesados = df_candidatos_procesar[~df_candidatos_procesar["kom_claimnumber"].isin(df_procesado_list)]
+
+    # Dry-run: limita a N aleatorios por plataforma (garantiza 1 por plataforma si existe)
+    if dry_run_limit is not None and dry_run_limit > 0 and not df_no_procesados.empty:
+        dfs = []
+        for plat in ["SQIS", "Salesforce"]:
+            sub = df_no_procesados[df_no_procesados["Plataforma"] == plat]
+            if not sub.empty:
+                # Para Salesforce, sobre-muestrea para compensar filtro Factory Warranty posterior en main()
+                n = dry_run_limit * 3 if plat == "Salesforce" else dry_run_limit
+                n = min(n, len(sub))
+                # random_state único por plataforma para reproducibilidad
+                rs = random.randint(0, 1_000_000)
+                dfs.append(sub.sample(n=n, random_state=rs))
+        if dfs:
+            df_no_procesados = pd.concat(dfs, ignore_index=True)
+            log.info(
+                "[DRY-RUN] Limitando a %s aleatorios por plataforma (seed=%s): SQIS=%d SF=%d",
+                dry_run_limit,
+                dry_run_seed or "random",
+                len(dfs[0]) if len(dfs) > 0 else 0,
+                len(dfs[1]) if len(dfs) > 1 else 0,
+            )
 
     reclamos_no_procesados = {
         row["kom_claimnumber"]: (
@@ -243,8 +294,11 @@ def actualizar_estados_existentes():
     log.info("=" * 50)
 
 
-def main(fuente: str = "ambos"):
-    Reclamos_Revisar, status_por_reclamo = Analisis(fuente)
+def main(fuente: str = "ambos", dry_run_limit: int | None = None):
+    dry_run_limit, _ = _resolve_dry_run_limit(dry_run_limit)
+    if dry_run_limit is not None:
+        log.info("[DRY-RUN] Modo dry-run activo: max %s por plataforma (aleatorio)", dry_run_limit)
+    Reclamos_Revisar, status_por_reclamo = Analisis(fuente, dry_run_limit=dry_run_limit)
 
     # Sincronizar status de claims ya existentes en BD
     if fuente in {"salesforce", "ambos"}:
@@ -255,6 +309,8 @@ def main(fuente: str = "ambos"):
 
     total = len(Reclamos_Revisar)
     log.info("Reclamos a procesar: %d", total)
+    # Dry-run: contadores por plataforma para limitar Factory Warranty reales procesados
+    _dry_processed = {"SQIS": 0, "Salesforce": 0}
 
     for i, (Reclamo, (createdon, tipoWC, plataforma, status_origen)) in enumerate(Reclamos_Revisar.items(), 1):
         registro_nuevo = None
@@ -264,6 +320,11 @@ def main(fuente: str = "ambos"):
             break
 
         log.info("=== [%d/%d] Reclamo %s | %s ===", i, total, Reclamo, plataforma)
+
+        # Dry-run temprano: si ya se alcanzó el límite para esta plataforma, saltar sin procesar
+        if dry_run_limit is not None and _dry_processed.get(plataforma, 0) >= dry_run_limit:
+            log.info("[DRY-RUN] Omitiendo %s | %s - límite %s ya alcanzado", Reclamo, plataforma, dry_run_limit)
+            continue
 
         if plataforma == "SQIS":
 
@@ -652,6 +713,9 @@ def main(fuente: str = "ambos"):
                 guardado_sql = encolar_registro(registro_nuevo)
                 destino = "SQL" if guardado_sql else "JSON de respaldo"
                 log.info("[%s] Registro guardado en %s", Reclamo, destino)
+                _dry_processed[plataforma] = _dry_processed.get(plataforma, 0) + 1
+                if dry_run_limit is not None and _dry_processed[plataforma] >= dry_run_limit:
+                    log.info("[DRY-RUN] Límite %s alcanzado para %s", dry_run_limit, plataforma)
 
     log.info("=== Procesamiento completado: %d reclamos procesados ===", len(nuevos_registros))
     sincronizar_pendientes_excel()
@@ -668,5 +732,24 @@ if __name__ == "__main__":
         default="ambos",
         help="Fuente a procesar (por defecto: ambos).",
     )
+    parser.add_argument(
+        "--dry-run",
+        type=int,
+        nargs="?",
+        const=1,
+        default=None,
+        dest="dry_run",
+        help="Dry-run: procesa N reclamos aleatorios por plataforma (default 1).",
+    )
+    parser.add_argument(
+        "--dry-run-seed",
+        type=str,
+        default=None,
+        help="Seed para muestreo reproducible.",
+    )
     args = parser.parse_args()
-    main(args.fuente)
+    if args.dry_run_seed is not None:
+        os.environ["DRY_RUN_SEED"] = str(args.dry_run_seed)
+    if args.dry_run is not None:
+        os.environ["DRY_RUN_LIMIT"] = str(args.dry_run)
+    main(args.fuente, dry_run_limit=args.dry_run)

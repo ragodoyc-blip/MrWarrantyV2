@@ -8,7 +8,9 @@ from mr_warranty.infrastructure.sql_storage import (
     is_sql_enabled,
 )
 
-RUTA_PENDIENTES = Path(__file__).resolve().parent.parent / "Reclamos_Procesados_pendientes.jsonl"
+from mr_warranty.config.paths import REPO_ROOT
+
+RUTA_PENDIENTES = REPO_ROOT / "Reclamos_Procesados_pendientes.jsonl"
 
 
 def _serializar_para_json(valor):
@@ -139,6 +141,43 @@ def actualizar_status_masivo(status_por_reclamo):
     except Exception as e:
         log.error("Error al actualizar status en SQL: %s", e)
         return 0
+
+
+def limpiar_pendientes_con_backup() -> Path | None:
+    """Crea backup con timestamp y limpia el JSONL si la sincronización fue exitosa."""
+    import shutil
+    import datetime
+
+    if not RUTA_PENDIENTES.exists():
+        log.info("No hay pendientes para limpiar (%s no existe)", RUTA_PENDIENTES)
+        return None
+
+    pendientes = _leer_pendientes()
+    if pendientes and is_sql_enabled():
+        sincronizar_pendientes_excel()
+        pendientes = _leer_pendientes()
+        if pendientes:
+            log.warning("No se borra: quedan %d pendientes tras sincronizar", len(pendientes))
+            return None
+
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    bak = RUTA_PENDIENTES.with_suffix(f".jsonl.bak.{ts}")
+    simple_bak = RUTA_PENDIENTES.with_suffix(".jsonl.bak")
+    try:
+        shutil.copy2(RUTA_PENDIENTES, bak)
+        shutil.copy2(RUTA_PENDIENTES, simple_bak)
+        log.info("Backup creado: %s y %s", bak, simple_bak)
+    except Exception as e:
+        log.error("Error creando backup: %s", e)
+        return None
+
+    if bak.stat().st_size == 0:
+        log.warning("Backup vacío, no se borra original")
+        return bak
+
+    RUTA_PENDIENTES.unlink(missing_ok=True)
+    log.info("Pendientes limpiado tras backup: %s", RUTA_PENDIENTES)
+    return bak
 
 
 # Funciones legado para no romper imports externos.
