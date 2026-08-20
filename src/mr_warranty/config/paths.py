@@ -9,7 +9,9 @@ PROJECT_SHIM_DIR = REPO_ROOT / "Proyecto"
 ADJUNTOS_DIR = REPO_ROOT / "AdjuntosSQIS"
 LOGS_DIR = REPO_ROOT / "logs"
 DATA_DIR = REPO_ROOT / "data"
-POPPLER_DEFAULT = REPO_ROOT / "Proyecto" / "ComplementosPoppler" / "Library" / "bin"
-# Fallbacks legados (si data/logs no existen en root, usar Proyecto/)
+POPPLER_DEFAULT = REPO_ROOT / "tools" / "poppler" / "Library" / "bin"
+# Fallbacks legados (mantiene compatibilidad con instalaciones antiguas en Proyecto/)
+if not POPPLER_DEFAULT.exists() and (REPO_ROOT / "Proyecto" / "ComplementosPoppler" / "Library" / "bin").exists():
+    POPPLER_DEFAULT = REPO_ROOT / "Proyecto" / "ComplementosPoppler" / "Library" / "bin"
 LOGS_DIR = LOGS_DIR if LOGS_DIR.exists() or not (REPO_ROOT / "Proyecto" / "logs").exists() else REPO_ROOT / "Proyecto" / "logs"
 DATA_DIR = DATA_DIR if DATA_DIR.exists() or not (REPO_ROOT / "Proyecto" / "Datos").exists() else REPO_ROOT / "Proyecto" / "Datos"

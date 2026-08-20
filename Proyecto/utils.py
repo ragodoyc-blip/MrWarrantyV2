@@ -100,11 +100,7 @@ def seleccionar_imagenes_para_ia(urls_sas: list[str], max_images: int = 10) -> l
     return seleccionadas[:max_images]
 
 
-def max_score_with_reason(score_kw: float, reason_kw: str, score_ia: float, reason_ia: str) -> tuple:
-    """Retorna (score_final, razon_final) usando el max entre keywords e IA.
-    Si la IA tiene un puntaje mayor, usa la razon de IA.
-    Si las keywords tienen mayor o igual puntaje, usa la razon de keywords.
-    """
+def max_score_with_reason(score_kw: float, reason_kw: str, score_ia: float, reason_ia: str) -> tuple:  # deprecated, mantener por compatibilidad historica, retorna max
     if score_ia > score_kw:
         return score_ia, reason_ia
     return score_kw, reason_kw

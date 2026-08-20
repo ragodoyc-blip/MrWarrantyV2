@@ -29,6 +29,9 @@ StanRate.xlsx
 # EdgeDriver
 edgedriver_win64/
 
+# Poppler binarios (duplicado local en tools/poppler para src autónomo)
+tools/poppler/
+
 # IDE
 .vscode/
 .idea/

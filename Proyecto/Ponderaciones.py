@@ -35,7 +35,6 @@ PONDERACIONES_STD_SF =  {
     "datapacks": 0.05,
     "work_order": 0.10,
     "purchase_invoice": 0.10,
-    "RootCause_analysis": 0.0,
 }
 
 PONDERACIONES_STD_SF_PC = {

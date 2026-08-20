@@ -355,36 +355,6 @@ def fotografias(dict_caso, extendermensaje, tipoWC):
     return call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=ponderacion)
 
 # =============================================================
-# 5) Análisis de Causa Raíz
-# =============================================================
-def root_cause_analysis(dict_caso, dict_chatter):
-    ponderacion_root_cause = PONDERACIONES_STD_SF.get("RootCause_analysis")
-    messages = [
-        {"role": "system", "content": SYSTEM_TEMPLATE},
-        {
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": f"""
-        Recibiras el diccionario {dict_caso} con un reclamo de garantía.
-        Debes analizar toda la información del caso y los posts de chatter asociados en {dict_chatter}.
-        Debes determinar si la causa raíz del problema está claramente identificada y respaldada por la evidencia proporcionada.
-
-
-        Si esta presente la causa raiz: score = {ponderacion_root_cause}, reason = 'OK'.
-        Si algo no coincide: score < {ponderacion_root_cause}, reason explicando claramente.
-        Responde SOLO un diccionario Python válido.
-        """
-                }
-            ]
-        }
-    ]
-
-    return call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion = ponderacion_root_cause)
-
-
-# =============================================================
 # 6) Validar adjunto con IA (technical_report, plm)
 # =============================================================
 def validar_adjunto_con_ia(

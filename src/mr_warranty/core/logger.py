@@ -22,7 +22,12 @@ def setup_logger(name: str = "mrwarranty", log_dir: str | None = None) -> loggin
     logger.setLevel(logging.DEBUG)
 
     if log_dir is None:
-        log_dir = Path(__file__).resolve().parent / "logs"
+        try:
+            from mr_warranty.config.paths import LOGS_DIR as _default_log_dir
+
+            log_dir = _default_log_dir
+        except Exception:
+            log_dir = Path(__file__).resolve().parent / "logs"
     else:
         log_dir = Path(log_dir)
 
