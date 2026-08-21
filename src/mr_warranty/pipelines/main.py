@@ -130,12 +130,17 @@ def Analisis(fuente: str = "ambos", dry_run_limit: int | None = None):
         )
 
     if procesar_salesforce:
-        df_sf = reclamos_pendientes()[["Name", "Status"]].copy()
+        _df_sf_raw = reclamos_pendientes()
+        # Necesitamos Id para filtrar WA Standard via ClaimCoverage bulk
+        cols = [c for c in ["Id", "Name", "Status"] if c in _df_sf_raw.columns]
+        df_sf = _df_sf_raw[cols].copy()
         df_sf["Plataforma"] = "Salesforce"
         df_sf.rename(columns={"Name": "kom_claimnumber", "Status": "status_origen"}, inplace=True)
+        if "Id" not in df_sf.columns:
+            df_sf["Id"] = None
     else:
         df_sf = pd.DataFrame(
-            columns=["kom_claimnumber", "status_origen", "Plataforma"]
+            columns=["Id", "kom_claimnumber", "status_origen", "Plataforma"]
         )
 
     df_wc = df_wc[df_wc["createdon"] >= DEFAULT_CREATEDON_FILTER]
@@ -173,6 +178,27 @@ def Analisis(fuente: str = "ambos", dry_run_limit: int | None = None):
 
     df_no_procesados = df_candidatos_procesar[~df_candidatos_procesar["kom_claimnumber"].isin(df_procesado_list)]
 
+    # Filtro Powr WA Standard - bulk excluye PC y otros CoverageType antes de procesar (B2)
+    if procesar_salesforce and not df_no_procesados.empty:
+        salesforce_mask = df_no_procesados["Plataforma"] == "Salesforce"
+        if salesforce_mask.any():
+            from mr_warranty.adapters.salesforce_client import obtener_coverage_map
+
+            try:
+                sf_claim_ids = df_no_procesados.loc[salesforce_mask, "Id"].dropna().astype(str).tolist()
+                coverage_map = obtener_coverage_map(sf_claim_ids)
+                wa_claim_ids = {cid for cid, cov in coverage_map.items() if cov == "WA - Standard Product Warranty"}
+                before = int(salesforce_mask.sum())
+                wa_mask = df_no_procesados["Id"].astype(str).isin(wa_claim_ids)
+                keep_mask = (~salesforce_mask) | wa_mask
+                df_no_procesados = df_no_procesados[keep_mask].copy()
+                after = int((df_no_procesados["Plataforma"] == "Salesforce").sum())
+                log.info("[WA FILTER] Salesforce WA Standard: %s -> %s (excluidos PC/otros y sin cobertura)", before, after)
+                if after == 0 and before > 0:
+                    log.warning("[WA FILTER] Ningún candidato Salesforce cumple WA Standard - revisa ClaimCoverage")
+            except Exception as e:
+                log.error("Error filtrando WA Standard en Analisis: %s", e)
+
     # Dry-run: limita a N aleatorios por plataforma (garantiza 1 por plataforma si existe)
     if dry_run_limit is not None and dry_run_limit > 0 and not df_no_procesados.empty:
         dfs = []
@@ -187,12 +213,14 @@ def Analisis(fuente: str = "ambos", dry_run_limit: int | None = None):
                 dfs.append(sub.sample(n=n, random_state=rs))
         if dfs:
             df_no_procesados = pd.concat(dfs, ignore_index=True)
+            sqis_cnt = int((df_no_procesados["Plataforma"] == "SQIS").sum())
+            sf_cnt = int((df_no_procesados["Plataforma"] == "Salesforce").sum())
             log.info(
                 "[DRY-RUN] Limitando a %s aleatorios por plataforma (seed=%s): SQIS=%d SF=%d",
                 dry_run_limit,
                 dry_run_seed or "random",
-                len(dfs[0]) if len(dfs) > 0 else 0,
-                len(dfs[1]) if len(dfs) > 1 else 0,
+                sqis_cnt,
+                sf_cnt,
             )
 
     reclamos_no_procesados = {
