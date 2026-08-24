@@ -69,6 +69,16 @@ def score_from_criteria(result: dict, max_score: float, criteria_keys: list[str]
 
     fulfilled = sum(is_true(criteria.get(key)) for key in criteria_keys)
     result["score"] = round(max_score * fulfilled / len(criteria_keys), 6)
+    # Post-proceso Plan A: asegura salto de línea antes de cada número para PowerApps/Excel
+    if "reason" in result and isinstance(result["reason"], str):
+        import re
+
+        reason = result["reason"].strip()
+        # Inserta \n antes de cada " 1) " " 2) " si no existe
+        reason = re.sub(r" (\d+\) )", r"\n\1", reason)
+        # Normaliza múltiples saltos y asegura que empiece sin \n extra
+        reason = re.sub(r"\n{2,}", "\n", reason)
+        result["reason"] = reason.strip()
     return result
 
 

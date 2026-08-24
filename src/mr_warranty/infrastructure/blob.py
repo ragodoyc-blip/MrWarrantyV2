@@ -9,6 +9,11 @@ import requests
 from pdf2image import convert_from_path
 from pdf2image.exceptions import PDFPageCountError
 
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    Image = None  # type: ignore
+
 from azure.storage.blob import (
     BlobServiceClient,
     BlobSasPermissions,
@@ -138,6 +143,66 @@ def pdf_to_imagenes(pdf_file_path: str, output_folder: str) -> list[str]:
     except Exception as e:
         log.error("Error inesperado al procesar PDF %s: %s", pdf_file_path, e)
         raise ValueError(f"Error inesperado al procesar el archivo PDF: {pdf_file_path}. Error: {e}")
+
+
+def excel_to_imagenes(excel_file_path: str, output_folder: str) -> list[str]:
+    """Convierte un Excel (PLM) a imagen para IA: extrae texto y genera PNG."""
+    if not os.path.exists(excel_file_path):
+        raise FileNotFoundError(f"El archivo Excel no existe: {excel_file_path}")
+    if Image is None:
+        raise ValueError("Pillow no disponible para convertir Excel a imagen")
+
+    try:
+        log.info("Procesando archivo Excel PLM: %s", excel_file_path)
+        # Extrae texto con openpyxl/pandas
+        text_lines: list[str] = []
+        try:
+            import openpyxl
+
+            wb = openpyxl.load_workbook(excel_file_path, read_only=True, data_only=True)
+            for ws in wb.worksheets:
+                text_lines.append(f"Hoja: {ws.title}")
+                for row in ws.iter_rows(values_only=True):
+                    if row and any(v is not None and str(v).strip() for v in row):
+                        vals = [str(v).strip() for v in row if v is not None and str(v).strip()]
+                        text_lines.append(" | ".join(vals)[:200])
+                        if len(text_lines) > 60:
+                            break
+                if len(text_lines) > 60:
+                    break
+        except Exception:
+            import pandas as pd
+
+            xls = pd.ExcelFile(excel_file_path)
+            for sheet in xls.sheet_names[:2]:
+                df = xls.parse(sheet, nrows=20)
+                text_lines.append(f"Hoja: {sheet}")
+                text_lines.append(df.to_string()[:2000])
+
+        if not text_lines:
+            text_lines = ["PLM Excel sin contenido legible"]
+
+        # Genera imagen con texto
+        base_name = os.path.splitext(os.path.basename(excel_file_path))[0]
+        out_path = os.path.join(output_folder, f"{base_name}_sheet_01.png")
+        # Imagen 1200x800
+        img = Image.new("RGB", (1200, 800), "white")
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.truetype("arial.ttf", 14)
+        except Exception:
+            font = ImageFont.load_default()
+        y = 10
+        for line in text_lines[:35]:
+            draw.text((10, y), line[:120], fill="black", font=font)
+            y += 22
+            if y > 750:
+                break
+        img.save(out_path, "PNG")
+        return [out_path]
+    except Exception as e:
+        log.error("Error al convertir Excel %s: %s", excel_file_path, e)
+        raise ValueError(f"No se pudo procesar Excel: {excel_file_path}. Error: {e}")
 
 
 def AdjuntosSQIS(ID_CLAIM: str) -> dict[str, list[str]]:

@@ -266,13 +266,13 @@ def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
     keywords = {
         "plm": [
             "plm", "payload meter", "payload", "tonnage",
-            "load", "weight", "cycle", "haul", "ton",
+            "load", "weight", "cycle", "haul", "haulcycle", "ton",
             "truck payload", "machine payload", "carga",
             "product lifecycle", "part number", "pn ",
         ],
         "analisis_aceite": ["oil analysis", "analisis de aceite", "oil leakage", "oil sample", "oil test"],
         "datapacks": [
-            "dsc_", "datapack", "dsc", "haulcycle", "alarmfile", "im2", "komtrax",
+            "dsc_", "datapack", "dsc", "alarmfile", "im2", "komtrax",
             "data ", "data_", "vhms", "vims", "vids", "ge_", "plm_ht", "komtrax",
         ],
         "reporte_tecnico": [
@@ -505,6 +505,7 @@ def descargar_y_subir_adjuntos_ia(
     sube a Azure Blob y retorna URLs SAS para enviar a Azure OpenAI.
     """
     from mr_warranty.infrastructure.blob import (
+        excel_to_imagenes,
         obtener_urls_blob_existentes,
         pdf_to_imagenes,
         subir_imagenes_blob,
@@ -578,11 +579,19 @@ def descargar_y_subir_adjuntos_ia(
                 if not descargar_archivo_salesforce(cv_id, local_file):
                     continue
 
-                if file_type == "PDF":
+                ft = (file_type or "").lower()
+                is_excel = any(x in ft for x in ("xls", "excel", "sheet"))
+                if ft == "pdf":
                     try:
                         png_files = pdf_to_imagenes(local_file, tmp_dir)
                     except Exception as e:
                         log.error("Error convirtiendo PDF a PNG: %s", e)
+                        continue
+                elif is_excel:
+                    try:
+                        png_files = excel_to_imagenes(local_file, tmp_dir)
+                    except Exception as e:
+                        log.error("Error convirtiendo Excel PLM a PNG: %s", e)
                         continue
                 else:
                     png_files = [local_file]
@@ -638,6 +647,30 @@ def obtener_coverage_type(claim_id: str) -> dict:
     except Exception as e:
         log.error("Error obteniendo coverage_type para %s: %s", claim_id, e)
     return {"coverage_type": "", "claim_group": "", "causal_part": "", "parts_amount": 0, "parts_quantity": 0}
+
+
+def obtener_coverage_map(claim_ids: list[str]) -> dict[str, str]:
+    """Bulk: retorna {ClaimId: CoverageType} para una lista de ClaimIds (usa 1 query)."""
+    if not claim_ids:
+        return {}
+    sf = connect_salesforce()
+    try:
+        # Chunk para no exceder longitud SOQL
+        result: dict[str, str] = {}
+        chunk_size = 200
+        for i in range(0, len(claim_ids), chunk_size):
+            chunk = claim_ids[i : i + chunk_size]
+            ids_filter = "', '".join(chunk)
+            query = f"SELECT ClaimId, CoverageType FROM ClaimCoverage WHERE ClaimId IN ('{ids_filter}')"
+            data = sf.query_all(query)
+            for rec in data.get("records", []):
+                cid = rec.get("ClaimId")
+                if cid:
+                    result[str(cid)] = rec.get("CoverageType", "") or ""
+        return result
+    except Exception as e:
+        log.error("Error obteniendo coverage_map bulk: %s", e)
+        return {}
 
 
 def seleccionar_imagenes_para_ia(urls_sas: list[str], max_images: int = 10) -> list[str]:
