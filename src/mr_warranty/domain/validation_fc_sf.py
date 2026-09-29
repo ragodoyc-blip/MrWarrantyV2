@@ -128,7 +128,26 @@ def ValidacionCostCoverage_SF(Diccionario_Salesforce_Reclamo: dict) -> dict:
     }
 
 
-def ValidacionStandard(Diccionario_Salesforce_Reclamo: dict, es_pc: bool = False, fecha_instalacion_parte: str = None) -> dict:
+# Claim_Type__c de Factory Warranty sin vigencia aplicable:
+# siempre puntaje máximo en within_standard_warranty con razón "No aplica.".
+CLAIM_TYPES_SIN_VIGENCIA = frozenset({
+    "SK - Repair prior to commissioning",
+    "S1 - Standard Warranty",
+    "MA - Missing or Damaged Part prior to commissioning",
+})
+
+# PC - Part DB Installed: vigencia invertida sobre el equipo.
+# El equipo NO debe estar en garantía: dentro de 1 año = 0, sobre 1 año = 100%.
+# La vigencia de la pieza la valida Salesforce al crear el claim (no se calcula aquí).
+CLAIM_TYPE_PC_DB_INSTALLED = "PC - Part DB Installed"
+
+
+def es_pc_db_installed(claim_type__c: str | None) -> bool:
+    """Indica si el reclamo es PC - Part DB Installed (vigencia invertida + doble factura)."""
+    return str(claim_type__c or "").strip().lower() == CLAIM_TYPE_PC_DB_INSTALLED.lower()
+
+
+def ValidacionStandard(Diccionario_Salesforce_Reclamo: dict, es_pc: bool = False, fecha_instalacion_parte: str = None, claim_type__c: str | None = None, es_pc_db: bool | None = None) -> dict:
     """Validación estándar para los reclamos de Salesforce (Factory Warranty)."""
     FailureDate__c = strip_tz(parse_datetime(Diccionario_Salesforce_Reclamo.get("FailureDate__c")))
     MachineRepairCompletionDate__c = strip_tz(parse_datetime(Diccionario_Salesforce_Reclamo.get("MachineRepairCompletionDate__c")))
@@ -162,7 +181,26 @@ def ValidacionStandard(Diccionario_Salesforce_Reclamo: dict, es_pc: bool = False
             Claim_Deadline_ponderacion = 0
 
     # Factory Warranty Expiration
-    if es_pc and fecha_instalacion_parte:
+    claim_type_norm = (claim_type__c or "").strip()
+    es_sin_vigencia = claim_type_norm in CLAIM_TYPES_SIN_VIGENCIA
+    if es_pc_db is None:
+        es_pc_db = es_pc_db_installed(claim_type__c)
+    if es_pc_db:
+        # PC - Part DB Installed: el equipo debe estar FUERA de garantía.
+        # Dentro de 1 año = 0; sobre 1 año = puntaje máximo.
+        if MachineCommissionedDate__c is None or FailureDate__c is None:
+            within_standard_warranty_reason = "No hay fecha de puesta en marcha o fecha de falla para validar que el equipo esté fuera de garantía (PC DB Installed)."
+            within_standard_warranty_ponderacion = 0
+        else:
+            within_standard_warranty_days = (FailureDate__c - MachineCommissionedDate__c).days
+            if within_standard_warranty_days <= 365:
+                within_standard_warranty_reason = f"El equipo está dentro del período de garantía estándar ({within_standard_warranty_days} días); PC DB Installed requiere equipo fuera de garantía."
+                within_standard_warranty_ponderacion = 0
+            else:
+                fecha_expiracion = MachineCommissionedDate__c + timedelta(days=365)
+                within_standard_warranty_reason = f"El equipo está fuera del período de garantía estándar (expiró el {fecha_expiracion.strftime('%d/%m/%Y')}); aplica PC DB Installed."
+                within_standard_warranty_ponderacion = _std_within_standard_warranty
+    elif es_pc and fecha_instalacion_parte:
         # Para PC: 1 año desde la fecha de instalación de la parte
         fecha_inst_dt = parse_datetime(fecha_instalacion_parte)
         if fecha_inst_dt and FailureDate__c:
@@ -177,6 +215,9 @@ def ValidacionStandard(Diccionario_Salesforce_Reclamo: dict, es_pc: bool = False
         else:
             within_standard_warranty_reason = "No se pudo determinar la fecha de instalación de la parte."
             within_standard_warranty_ponderacion = 0
+    elif es_sin_vigencia:
+        within_standard_warranty_reason = "No aplica."
+        within_standard_warranty_ponderacion = _std_within_standard_warranty
     elif MachineCommissionedDate__c is None or FailureDate__c is None:
         within_standard_warranty_reason = "No hay fecha de puesta en marcha o fecha de falla para validar la vigencia de la garantía."
         within_standard_warranty_ponderacion = 0

@@ -125,6 +125,8 @@ def call_azure_gpt(messages, deployment, max_ponderacion, max_retries=3, parse_m
         api_key=AZURE_OPENAI_KEY,
     )
 
+    from mr_warranty.core.ia_cost import registrar_llamada
+
     retry = 0
     backoff = 0.5
 
@@ -136,6 +138,11 @@ def call_azure_gpt(messages, deployment, max_ponderacion, max_retries=3, parse_m
                 temperature=0.0,
                 top_p=1.0,
                 model=deployment,
+            )
+            usage = getattr(response, "usage", None)
+            registrar_llamada(
+                getattr(usage, "prompt_tokens", None) if usage else None,
+                getattr(usage, "completion_tokens", None) if usage else None,
             )
             texto = response.choices[0].message.content
             if parse_mode == "clasificacion":
@@ -721,7 +728,7 @@ def validar_purchase_invoice_con_ia(urls_sas: list[str], claim_data: dict) -> di
     if not urls_sas:
         return {"score": 0, "reason": "No hay documentos adjuntos para validar Purchase Invoice"}
 
-    from mr_warranty.core.utils import seleccionar_imagenes_para_ia
+    from mr_warranty.core.utils import usa_prompt_sap, seleccionar_imagenes_para_ia
 
     system = (
         "Eres un analista tecnico de Komatsu. "
@@ -762,6 +769,53 @@ def validar_purchase_invoice_con_ia(urls_sas: list[str], claim_data: dict) -> di
     No supongas datos que no sean visibles. Explica criterios cumplidos, faltantes y contradicciones.
     Responde SOLO un diccionario Python válido.
     """
+    criteria_keys = ["part_number", "purchase_date", "before_installation_and_repair", "quantity", "installed_part_match"]
+
+    if usa_prompt_sap(claim_data):
+        # Chile (país CL u oficina chilena con país vacío): lo habitual es
+        # un recorte SAP (Visual.KCC Orden Garantía), pero puede venir
+        # factura tradicional. La IA auto-detecta el tipo.
+        user_text = f"""
+    Analiza las imagenes adjuntas buscando el respaldo de la pieza reclamada.
+    Este Claim es de Chile: lo habitual es un RECORTE SAP, pero tambien puede venir una FACTURA DE COMPRA tradicional.
+
+    Informacion del Claim {claim_name}:
+    - Parte causal: {causal_part}
+    - Código de producto: {product_code}
+    - Fecha de instalación de la pieza: {installation_date}
+    - Fecha de reparación: {repair_date}
+    - Fecha del Claim: {claim_date}
+    - Cantidad reclamada: {quantity}
+
+    Primero identifica el tipo de documento y devuelvelo en 'document_type':
+    - "sap": pantalla SAP "Visual.KCC Orden Garantía" con número de Orden (ZM01 ...),
+      pestaña "Componentes" y tabla con columnas Pos. / Componente / Denomin. /
+      Ctd.neces. / UM / Alm. / Ce. / Op. / Lote.
+    - "factura": factura de compra tradicional del componente/parte.
+
+    Si es "sap", evalúa cinco criterios independientes:
+    1. El número de orden (ZM01 ...) es legible.
+    2. El número de parte aparece en la columna Componente y coincide con la parte causal/instalada/reclamada.
+    3. La cantidad en Ctd.neces. es legible y coherente con la cantidad reclamada.
+    4. La denominación/descripción se relaciona con la pieza reclamada.
+    5. El documento es reconocible como recorte SAP (cabecera SAP, pestaña Componentes).
+    Devuelve criteria con estas claves booleanas exactas:
+    sap_order_number, sap_part_number, sap_quantity, sap_part_match, sap_layout.
+
+    Si es "factura", evalúa cinco criterios independientes:
+    1. El número de parte es legible.
+    2. La fecha de compra es legible.
+    3. La fecha de compra es anterior a la fecha de instalación/reemplazo y a la fecha de reparación.
+    4. La cantidad facturada es legible y coherente con la cantidad reclamada.
+    5. La pieza facturada se relaciona con la pieza instalada y reclamada.
+    Devuelve criteria con estas claves booleanas exactas:
+    part_number, purchase_date, before_installation_and_repair, quantity, installed_part_match.
+
+    Asigna score = 0.10 multiplicado por criterios cumplidos / 5.
+    El score debe ser el valor absoluto entre 0 y 0.10.
+    No supongas datos que no sean visibles. Explica el tipo detectado, criterios cumplidos, faltantes y contradicciones.
+    Responde SOLO un diccionario Python válido.
+    """
 
     urls_limitadas = seleccionar_imagenes_para_ia(urls_sas, max_images=5)
 
@@ -777,11 +831,11 @@ def validar_purchase_invoice_con_ia(urls_sas: list[str], claim_data: dict) -> di
     ]
 
     result = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=0.10)
-    return score_from_criteria(
-        result,
-        0.10,
-        ["part_number", "purchase_date", "before_installation_and_repair", "quantity", "installed_part_match"],
-    )
+    if usa_prompt_sap(claim_data):
+        doc_type = str(result.get("document_type", "")).strip().lower()
+        if doc_type.startswith("sap"):
+            criteria_keys = ["sap_order_number", "sap_part_number", "sap_quantity", "sap_part_match", "sap_layout"]
+    return score_from_criteria(result, 0.10, criteria_keys)
 
 
 # =============================================================
@@ -815,7 +869,7 @@ def clasificar_documento_adjunto(
     - "fotografias": Evidencia fotografica, fotos de la falla, reparacion, maquina funcionando, videos
     - "analisis_aceite": Oil analysis, analisis de aceite, muestra de lubricante, laboratorio de aceite
     - "work_order": Work Order, Service Order, orden de trabajo, repair order
-    - "purchase_invoice": Purchase Invoice, factura de compra, invoice de una pieza
+    - "purchase_invoice": Purchase Invoice, factura de compra, invoice de una pieza, recorte/pantallazo SAP (Visual.KCC Orden Garantia, resumen de componentes)
     - "otro": Facturas, ordenes de compra, work orders, certificados, cualquier otro documento
 
     Contexto del Claim:
@@ -909,3 +963,248 @@ def validar_photographs_con_ia(
 
     result = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=ponderacion)
     return score_from_criteria(result, ponderacion, ["component_match", "failure_evidence", "before_after"])
+
+
+# =============================================================
+# 12) Extraer partes failing/installed para PC - Part DB Installed
+# =============================================================
+import re as _re_db
+
+_PATRON_PARTE_GUION = _re_db.compile(
+    r"\b\d{3,4}\s*-\s*\d{2}\s*-\s*\d{3,4}[A-Z0-9]*\b", _re_db.IGNORECASE
+)
+_PATRON_PARTE_DASH = _re_db.compile(
+    r"\b(?=[A-Z0-9-]*\d)[A-Z0-9]{2,}(?:\s*-\s*[A-Z0-9]{2,}){1,2}\b", _re_db.IGNORECASE
+)
+_PATRON_PARTE_ALFANUM = _re_db.compile(
+    r"\b(?=[A-Z0-9]*\d)[A-Z0-9]{5,}\b", _re_db.IGNORECASE
+)
+_STOPWORDS_PARTES = frozenset({
+    "AND", "THE", "FOR", "WITH", "FROM", "REPAIR", "ORDER", "INVOICE",
+    "VISUAL", "COMPONENTE", "COMPONENTES", "DENOMIN", "NECES", "ORDEN",
+    "GARANTIA", "CLAIM", "CASE", "DATE", "PART",
+})
+
+
+def _normalizar_parte(texto: str) -> str:
+    """Normaliza un número de parte: mayúsculas, sin espacios extra."""
+    t = str(texto or "").strip().upper()
+    t = _re_db.sub(r"\s+", " ", t)
+    t = t.replace(" ", "")
+    return t
+
+
+def _candidatos_parte(texto: str) -> list[str]:
+    """Extrae candidatos de número de parte desde texto libre."""
+    if not texto:
+        return []
+    cands: list[str] = []
+    vistos: set[str] = set()
+    for rx in (_PATRON_PARTE_GUION, _PATRON_PARTE_DASH, _PATRON_PARTE_ALFANUM):
+        for m in rx.finditer(str(texto)):
+            norm = _normalizar_parte(m.group(0))
+            if len(norm) < 5 or norm in _STOPWORDS_PARTES:
+                continue
+            if not any(c.isdigit() for c in norm):
+                continue
+            if norm not in vistos:
+                vistos.add(norm)
+                cands.append(norm)
+    return cands
+
+
+def extraer_partes_db_installed(
+    dict_claim: dict | None,
+    dict_tsi: dict | None,
+    causal_part: str = "",
+    product_code: str = "",
+) -> dict:
+    """Extrae pieza que falla y pieza instalada para PC - Part DB Installed.
+
+    Ambas pueden venir SOLO en texto libre (Correction/Cause/Description/
+    Resolution/Chatter). Los campos estructurados (CausalPart__c,
+    Product_Code__c) se usan solo como pista, no como requisito.
+
+    Retorna: {'failing': str, 'installed': str, 'razon': str}
+    """
+    claim = dict_claim or {}
+    tsi = dict_tsi or {}
+    # Chatter puede venir como dict con Posts o como texto plano.
+    chatter_txt = ""
+    chatter = claim.get("_chatter") if isinstance(claim, dict) else None
+    if isinstance(chatter, dict):
+        posts = chatter.get("Posts") or []
+        chatter_txt = " ".join(
+            str(p.get("Texto", "")) for p in posts if isinstance(p, dict)
+        )
+    elif isinstance(dict_tsi, dict) and isinstance(dict_tsi.get("_chatter"), dict):
+        posts = dict_tsi.get("_chatter", {}).get("Posts") or []
+        chatter_txt = " ".join(
+            str(p.get("Texto", "")) for p in posts if isinstance(p, dict)
+        )
+
+    texto_correccion = " ".join([
+        str(claim.get("Correction__c", "") or ""),
+        str((tsi or {}).get("Resolution_Details__c", "") or ""),
+        str((tsi or {}).get("Description", "") or ""),
+        str(chatter_txt or ""),
+    ])
+    texto_general = " ".join([
+        str(claim.get("Complaint__c", "") or ""),
+        str(claim.get("Cause__c", "") or ""),
+        str(claim.get("Summary", "") or ""),
+        str(claim.get("Description", "") or ""),
+        str(claim.get("AdditionalComments__c", "") or ""),
+        str((tsi or {}).get("Subject", "") or ""),
+        texto_correccion,
+    ])
+
+    failing_estruct = _normalizar_parte(causal_part) or _normalizar_parte(product_code)
+    cands_correccion = _candidatos_parte(texto_correccion)
+    cands_general = _candidatos_parte(texto_general)
+
+    failing = failing_estruct
+    if failing and failing in cands_general:
+        resto = [c for c in cands_correccion + cands_general if c != failing]
+    elif failing:
+        resto = [c for c in cands_correccion + cands_general if c != failing]
+    else:
+        failing = cands_general[0] if cands_general else ""
+        resto = [c for c in cands_correccion + cands_general if c != failing]
+
+    installed = ""
+    for c in cands_correccion:
+        if c != failing:
+            installed = c
+            break
+    if not installed:
+        for c in resto:
+            if c != failing:
+                installed = c
+                break
+
+    origen_f = "estructurado" if failing_estruct and failing == failing_estruct else "texto"
+    if failing and installed:
+        razon = (
+            f"Falla={failing} ({origen_f}), instalada={installed} (texto Correction/Resolution). "
+            "Ambas pueden venir solo en descripción."
+        )
+    elif failing:
+        razon = f"Falla={failing} ({origen_f}); no se encontró segunda parte distinta en Correction/Resolution."
+    else:
+        razon = "No se encontraron números de parte en campos ni en descripción."
+    return {"failing": failing, "installed": installed, "razon": razon}
+
+
+# =============================================================
+# 13) Validar doble factura para PC - Part DB Installed (sin vigencia)
+# =============================================================
+def validar_purchase_invoice_db_installed_con_ia(
+    urls_sas: list[str],
+    claim_data: dict,
+    num_docs: int | None = None,
+) -> dict:
+    """Valida doble factura DB Installed: falla + instalada. Sin cálculo de año.
+
+    La vigencia de la pieza la bloquea Salesforce al crear el claim; aquí solo
+    se verifica que existan los 2 respaldos y correspondan a las partes.
+    Retorna: {'score': <float>, 'reason': '<texto>'}
+    """
+    if not urls_sas:
+        return {"score": 0, "reason": "No hay documentos adjuntos para validar doble factura (PC DB Installed)"}
+    if num_docs is not None and num_docs < 2:
+        return {
+            "score": 0,
+            "reason": f"Solo {num_docs} respaldo(s) de factura; PC DB Installed exige factura de la pieza que falla y de la instalada.",
+        }
+
+    from mr_warranty.core.utils import usa_prompt_sap, seleccionar_imagenes_para_ia
+
+    system = (
+        "Eres un analista tecnico de Komatsu. "
+        "Debes responder SIEMPRE en formato diccionario Python. "
+        "Formato: {'score': <float>, 'reason': '<texto>'}"
+    )
+
+    claim_name = claim_data.get("Name", "")
+    failing = claim_data.get("FailingPart__c", "") or claim_data.get("CausalPart__c", "") or ""
+    installed = claim_data.get("InstalledPart__c", "") or ""
+    product_code = claim_data.get("Product_Code__c", "") or ""
+    quantity = claim_data.get("Parts_Requested_Quantity__c", 0) or 0
+
+    criteria_keys = [
+        "factura1_legible", "factura1_match_falla",
+        "factura2_legible", "factura2_match_instalada",
+        "cantidades_coherentes",
+    ]
+    user_text = f"""
+    Analiza las imagenes adjuntas buscando DOS respaldos de compra (facturas o recortes SAP):
+    factura 1 = pieza que FALLA, factura 2 = pieza INSTALADA.
+    NO calcules vigencia de la pieza (Salesforce ya la valida al crear el claim).
+
+    Informacion del Claim {claim_name}:
+    - Pieza que falla (factura 1): {failing}
+    - Pieza instalada (factura 2): {installed}
+    - Codigo de producto: {product_code}
+    - Cantidad reclamada: {quantity}
+    Nota: ambas partes pueden venir solo en la descripcion del Claim/TSI, no necesariamente en campos estructurados.
+
+    Evalua cinco criterios independientes:
+    1. Hay un primer respaldo legible (factura1_legible).
+    2. La factura 1 corresponde a la pieza que falla ({failing}) (factura1_match_falla).
+    3. Hay un segundo respaldo legible (factura2_legible).
+    4. La factura 2 corresponde a la pieza instalada ({installed}) (factura2_match_instalada).
+    5. Cantidades legibles y coherentes con la cantidad reclamada (cantidades_coherentes).
+
+    Asigna score = 0.10 multiplicado por criterios cumplidos / 5.
+    Devuelve tambien criteria con estas claves booleanas exactas:
+    factura1_legible, factura1_match_falla, factura2_legible, factura2_match_instalada, cantidades_coherentes.
+    El score debe ser el valor absoluto entre 0 y 0.10.
+    No supongas datos que no sean visibles. Explica criterios cumplidos, faltantes y contradicciones.
+    Responde SOLO un diccionario Python valido.
+    """
+
+    if usa_prompt_sap(claim_data):
+        user_text = f"""
+    Analiza las imagenes adjuntas buscando DOS respaldos de la pieza (facturas tradicionales o recortes SAP Visual.KCC Orden Garantia).
+    Este Claim es de Chile: acepta 2x SAP, 2x factura o mixto. NO calcules vigencia (Salesforce ya la valida).
+
+    Informacion del Claim {claim_name}:
+    - Pieza que falla (respaldo 1): {failing}
+    - Pieza instalada (respaldo 2): {installed}
+    - Codigo de producto: {product_code}
+    - Cantidad reclamada: {quantity}
+
+    Primero identifica el tipo de cada respaldo en 'document_type' ("sap", "factura" o "mixto"):
+    - "sap": pantalla SAP con numero de Orden (ZM01 ...), pestana "Componentes" y columnas Pos. / Componente / Denomin. / Ctd.neces.
+    - "factura": factura de compra tradicional con numero de parte, fecha y cantidad.
+
+    Evalua cinco criterios independientes:
+    1. Hay un primer respaldo legible (factura1_legible).
+    2. El respaldo 1 corresponde a la pieza que falla ({failing}) en Componente/parte (factura1_match_falla).
+    3. Hay un segundo respaldo legible (factura2_legible).
+    4. El respaldo 2 corresponde a la pieza instalada ({installed}) (factura2_match_instalada).
+    5. Cantidades (Ctd.neces./facturada) legibles y coherentes (cantidades_coherentes).
+
+    Asigna score = 0.10 multiplicado por criterios cumplidos / 5.
+    Devuelve criteria con estas claves exactas:
+    factura1_legible, factura1_match_falla, factura2_legible, factura2_match_instalada, cantidades_coherentes.
+    El score debe ser el valor absoluto entre 0 y 0.10.
+    Responde SOLO un diccionario Python valido.
+    """
+
+    urls_limitadas = seleccionar_imagenes_para_ia(urls_sas, max_images=8)
+
+    messages = [
+        {"role": "system", "content": system},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_text},
+                *[{"type": "image_url", "image_url": {"url": url}} for url in urls_limitadas],
+            ],
+        },
+    ]
+
+    result = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=0.10)
+    return score_from_criteria(result, 0.10, criteria_keys)

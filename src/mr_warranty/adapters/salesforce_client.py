@@ -83,7 +83,7 @@ def process_salesforce_data(name: str) -> dict:
         "Servicing_Distributor__c", "Field_Campaign__c",
         "LaborRequestedQuantity__c", "PartsRequestedQuantity__c",
         "Mileage__c", "Travel_Time__c", "Parts_Required__c",
-        "SubmittedDate__c",
+        "SubmittedDate__c", "Claim_country__c",
     ]
 
     # Parametrizado para evitar SOQL injection
@@ -99,7 +99,7 @@ def process_salesforce_data(name: str) -> dict:
         "FailureDate__c", "MachineRepairCompletionDate__c",
         "MachineCommissionedDate__c", "TrackingDepartment__c",
         "CauseOfFailure__c", "TSI_Title__c", "Closed_Reason__c",
-        "Resolution_Details__c",
+        "Resolution_Details__c", "Sales_Office__c",
     ]
 
     ids_filter = "', '".join(tsi_list)
@@ -249,9 +249,12 @@ def buscar_adjuntos_sf(entity_id: str) -> list[dict]:
 
 def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
     """
-    Clasifica adjuntos por tipo basándose en el nombre del archivo.
-    Retorna dict con listas de documentos encontrados por categoría.
-    Los Technical Reports y las fotografías se mantienen como categorías separadas.
+    Clasifica adjuntos por reglas deterministicas (sin IA).
+
+    Solo PLM y datapacks se rutean por nombre (keywords). Los videos van a
+    fotografias por extension. Todo lo demas lo clasifica la IA por contenido
+    en validar_adjuntos_requeridos. Retorna dict con las 7 categorias
+    (las no ruteadas por reglas quedan vacias para la IA).
     """
     classifications = {
         "plm": [],
@@ -270,57 +273,26 @@ def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
             "truck payload", "machine payload", "carga",
             "product lifecycle", "part number", "pn ",
         ],
-        "analisis_aceite": ["oil analysis", "analisis de aceite", "oil leakage", "oil sample", "oil test"],
         "datapacks": [
             "dsc_", "datapack", "dsc", "alarmfile", "im2", "komtrax",
             "data ", "data_", "vhms", "vims", "vids", "ge_", "plm_ht", "komtrax",
         ],
-        "reporte_tecnico": [
-            "technical report", "reporte tecnico", "failure analysis",
-            "analisis de falla", "repair", "reparacion", "flash report",
-            "tr-", "tr_", "tr ", "tsi", "claim report", "service letter",
-            "service news", "informe", "falla", "leak", "needle", "sensor",
-            "assembly", "replacement", "trouble", "diagnostico",
-        ],
-        "fotografias": [
-            "foto", "photo", "imagen", "image", "picture", "evidencia",
-            "img_", "screenshot", "captura", "video", "avi", "mp4",
-            "ht", "before", "after", "installation", "evidencia", "pic",
-        ],
-        "work_order": [
-            "work order", "workorder", "service order", "orden de trabajo",
-            "repair order", "ro_", "ro-", "job card",
-        ],
-        "purchase_invoice": [
-            "purchase invoice", "invoice", "factura", "purchase", "bill",
-        ],
     }
+
+    videos = ("mp4", "mov", "avi")
 
     for adj in adjuntos:
         title_lower = adj["title"].lower()
         file_type = (adj.get("file_type") or "").lower()
-        es_reporte_tecnico = False
-        es_video_o_imagen = file_type in ("mp4", "mov", "avi", "jpg", "jpeg", "png", "heic", "bmp", "tiff")
 
-        # Primero verificar si es reporte técnico
-        # Solo PDFs o docs sin extension clara pueden ser technical reports
-        # Videos e imagenes sueltas NO son technical reports
-        if not es_video_o_imagen:
-            if any(kw in title_lower for kw in keywords["reporte_tecnico"]):
-                classifications["reporte_tecnico"].append(adj["title"])
-                es_reporte_tecnico = True
-
-        # Verificar otras categorías
         for tipo, kw_list in keywords.items():
-            if tipo == "reporte_tecnico":
-                continue  # Ya se verificó arriba
             if any(kw in title_lower for kw in kw_list):
-                classifications[tipo].append(adj["title"])
+                if adj["title"] not in classifications[tipo]:
+                    classifications[tipo].append(adj["title"])
 
-        # Detectar fotografías por extension si no se clasifico antes
-        if not any(adj["title"] in classifications[t] for t in classifications):
-            if es_video_o_imagen:
-                classifications["fotografias"].append(adj["title"])
+        # Videos a fotografias por extension (la IA no ve video)
+        if file_type in videos and adj["title"] not in classifications["fotografias"]:
+            classifications["fotografias"].append(adj["title"])
 
     return classifications
 
@@ -334,7 +306,9 @@ def validar_adjuntos_requeridos(
     """
     Valida la presencia de documentos requeridos en un claim de Salesforce.
     Busca adjuntos tanto en el Claim como en el Case (TSI).
-    Usa clasificacion hibrida: keywords primero, IA para casos sin match.
+    Ruteo por contenido: keywords solo para PLM/datapacks; videos a fotos
+    por extension; ZIPs no visibles a datapacks u otro; todo lo demas
+    legible (imagen/PDF/Excel/Word/texto) lo clasifica la IA por contenido.
     """
     # Buscar adjuntos en Claim
     adjuntos_claim = buscar_adjuntos_sf(claim_id)
@@ -350,7 +324,7 @@ def validar_adjuntos_requeridos(
             adjuntos_combinados.append(adj)
             ids_vistos.add(adj["id"])
 
-    # Clasificar con keywords primero
+    # Clasificar por reglas (solo PLM/datapacks por nombre, videos a fotos)
     classifications = clasificar_adjuntos(adjuntos_combinados)
     classification_details = {}
     for adj in adjuntos_combinados:
@@ -361,7 +335,7 @@ def validar_adjuntos_requeridos(
         ]
         classification_details[adj["id"]] = {"categories": categories}
 
-    # Detectar adjuntos no clasificados (excluyendo datapacks que ya estan OK)
+    # Pendientes de clasificar por contenido (todo lo no ruteado por reglas)
     titles_clasificados = set()
     for docs in classifications.values():
         titles_clasificados.update(docs)
@@ -371,26 +345,29 @@ def validar_adjuntos_requeridos(
         if adj["title"] not in titles_clasificados
     ]
 
-    # Enviar a IA los no clasificados (que sean PDFs, no videos)
+    # Tipos que la IA puede ver (el resto va por reglas u otro)
+    tipos_legibles_ia = {
+        "pdf", "jpg", "jpeg", "png", "heic", "bmp", "tiff", "tif", "webp", "gif",
+        "xls", "xlsx", "xlsm", "docx", "docm",
+        "csv", "txt", "eml", "html", "htm", "msg", "log",
+    }
     keywords_dp = ["dsc_", "datapack", "dsc", "haulcycle", "alarmfile", "im2", "komtrax"]
     for adj in no_clasificados:
         title_lower = adj["title"].lower()
         file_type = (adj.get("file_type") or "").lower()
 
-        # Saltar datapacks (ya estan bien clasificados por keyword)
-        if any(kw in title_lower for kw in keywords_dp):
-            if adj["title"] not in classifications["datapacks"]:
-                classifications["datapacks"].append(adj["title"])
+        if file_type not in tipos_legibles_ia:
+            # No visible por IA (ej. ZIP): intento datapacks por nombre, si no, otro.
+            if any(kw in title_lower for kw in keywords_dp):
+                if adj["title"] not in classifications["datapacks"]:
+                    classifications["datapacks"].append(adj["title"])
+                    classification_details[adj["id"]] = {"categories": ["datapacks"]}
+            else:
+                log.info(f"[OMITIDO] {adj['title']}: formato no analizable, sin categoria")
             continue
 
-        # Saltar videos (se clasifican por extension)
-        if file_type in ("mp4", "mov", "avi"):
-            if adj["title"] not in classifications["fotografias"]:
-                classifications["fotografias"].append(adj["title"])
-            continue
-
-        # Enviar a IA
-        log.info(f"Sin match por keywords, enviando a IA: {adj['title']}")
+        # Clasificar por contenido con IA
+        log.info(f"Clasificando por contenido con IA: {adj['title']}")
         try:
             resultado_ia = clasificar_adjunto_con_ia(adj, claim_data)
             cat = resultado_ia.get("categoria", "otro")
@@ -501,13 +478,12 @@ def descargar_y_subir_adjuntos_ia(
     attachment_details: dict | None = None,
 ) -> dict:
     """
-    Descarga adjuntos de las categorías especificadas, convierte PDFs a PNG,
+    Descarga adjuntos de las categorías especificadas, convierte archivos a PNG,
     sube a Azure Blob y retorna URLs SAS para enviar a Azure OpenAI.
     """
     from mr_warranty.infrastructure.blob import (
-        excel_to_imagenes,
+        archivo_a_imagenes,
         obtener_urls_blob_existentes,
-        pdf_to_imagenes,
         subir_imagenes_blob,
     )
 
@@ -579,22 +555,13 @@ def descargar_y_subir_adjuntos_ia(
                 if not descargar_archivo_salesforce(cv_id, local_file):
                     continue
 
-                ft = (file_type or "").lower()
-                is_excel = any(x in ft for x in ("xls", "excel", "sheet"))
-                if ft == "pdf":
-                    try:
-                        png_files = pdf_to_imagenes(local_file, tmp_dir)
-                    except Exception as e:
-                        log.error("Error convirtiendo PDF a PNG: %s", e)
-                        continue
-                elif is_excel:
-                    try:
-                        png_files = excel_to_imagenes(local_file, tmp_dir)
-                    except Exception as e:
-                        log.error("Error convirtiendo Excel PLM a PNG: %s", e)
-                        continue
-                else:
-                    png_files = [local_file]
+                try:
+                    png_files = archivo_a_imagenes(local_file, tmp_dir)
+                except Exception as e:
+                    log.error("Error convirtiendo %s a PNG: %s", titulo, e)
+                    continue
+                if not png_files:
+                    log.info("[OMITIDO] %s: formato no convertible a imagen (se conserva título)", titulo)
 
                 urls = subir_imagenes_blob(blob_folder, tmp_dir)
                 urls_sas_categoria.extend(urls)
@@ -649,28 +616,47 @@ def obtener_coverage_type(claim_id: str) -> dict:
     return {"coverage_type": "", "claim_group": "", "causal_part": "", "parts_amount": 0, "parts_quantity": 0}
 
 
-def obtener_coverage_map(claim_ids: list[str]) -> dict[str, str]:
-    """Bulk: retorna {ClaimId: CoverageType} para una lista de ClaimIds (usa 1 query)."""
+def obtener_coverage_map(claim_ids: list[str]) -> dict:
+    """Bulk: retorna {ClaimId: CoverageType | {coverage_type, claim_type__c}}.
+
+    Incluye Claim_Type__c para distinguir PC - Part DB Installed de otros PC.
+    Por compatibilidad, si solo se necesita el string, usar
+    obtener_coverage_type_map_simple().
+    """
     if not claim_ids:
         return {}
     sf = connect_salesforce()
     try:
         # Chunk para no exceder longitud SOQL
-        result: dict[str, str] = {}
+        result: dict = {}
         chunk_size = 200
         for i in range(0, len(claim_ids), chunk_size):
             chunk = claim_ids[i : i + chunk_size]
             ids_filter = "', '".join(chunk)
-            query = f"SELECT ClaimId, CoverageType FROM ClaimCoverage WHERE ClaimId IN ('{ids_filter}')"
+            query = f"SELECT ClaimId, CoverageType, Claim_Type__c FROM ClaimCoverage WHERE ClaimId IN ('{ids_filter}')"
             data = sf.query_all(query)
             for rec in data.get("records", []):
                 cid = rec.get("ClaimId")
                 if cid:
-                    result[str(cid)] = rec.get("CoverageType", "") or ""
+                    result[str(cid)] = {
+                        "coverage_type": rec.get("CoverageType", "") or "",
+                        "claim_type__c": rec.get("Claim_Type__c", "") or "",
+                    }
         return result
     except Exception as e:
         log.error("Error obteniendo coverage_map bulk: %s", e)
         return {}
+
+
+def obtener_coverage_type_map_simple(coverage_map: dict) -> dict[str, str]:
+    """Compat: convierte el mapa detallado a {ClaimId: CoverageType}."""
+    simple: dict[str, str] = {}
+    for cid, val in (coverage_map or {}).items():
+        if isinstance(val, dict):
+            simple[str(cid)] = val.get("coverage_type", "") or ""
+        else:
+            simple[str(cid)] = val or ""
+    return simple
 
 
 def seleccionar_imagenes_para_ia(urls_sas: list[str], max_images: int = 10) -> list[str]:
@@ -681,8 +667,8 @@ def seleccionar_imagenes_para_ia(urls_sas: list[str], max_images: int = 10) -> l
 
 def clasificar_adjunto_con_ia(adjunto: dict, claim_data: dict | None = None) -> dict:
     """
-    Descarga un adjunto, lo convierte a imagen si es PDF, lo sube a Blob
-    y pregunta a Azure OpenAI que tipo de documento es.
+    Descarga un adjunto, lo convierte a imagen (PDF/Excel/Word/texto/imagen),
+    lo sube a Blob y pregunta a Azure OpenAI que tipo de documento es.
 
     Retorna: {
         "categoria": "reporte_tecnico|plm|fotografias|analisis_aceite|otro",
@@ -690,12 +676,12 @@ def clasificar_adjunto_con_ia(adjunto: dict, claim_data: dict | None = None) -> 
         "razon": "..."
     }
     """
-    from mr_warranty.infrastructure.blob import pdf_to_imagenes, subir_imagenes_blob
+    from mr_warranty.infrastructure.blob import archivo_a_imagenes, subir_imagenes_blob
     from mr_warranty.services.prompts import clasificar_documento_adjunto
     from mr_warranty.infrastructure.cache import get_clasificacion_cache, save_clasificacion_cache
 
-    # La taxonomía incluye Work Order e Invoice; no reutilizar clasificaciones antiguas.
-    cache_key = f"v2:{adjunto['id']}"
+    # La taxonomía incluye recortes SAP como invoice; no reutilizar clasificaciones antiguas.
+    cache_key = f"v3:{adjunto['id']}"
     cached = get_clasificacion_cache(cache_key)
     if cached:
         log.info(f"[CACHE] {adjunto['title']}: {cached.get('categoria')} (confianza={cached.get('confianza', 0):.2f})")
@@ -718,14 +704,13 @@ def clasificar_adjunto_con_ia(adjunto: dict, claim_data: dict | None = None) -> 
         if not descargar_archivo_salesforce(cv_id, local_file):
             return {"categoria": "otro", "confianza": 0.0, "razon": "Error al descargar"}
 
-        if file_type == "pdf":
-            try:
-                png_files = pdf_to_imagenes(local_file, tmp_dir)
-            except Exception as e:
-                log.error(f"Error convirtiendo PDF a PNG: {e}")
-                return {"categoria": "otro", "confianza": 0.0, "razon": f"Error PDF: {e}"}
-        else:
-            png_files = [local_file]
+        try:
+            png_files = archivo_a_imagenes(local_file, tmp_dir)
+        except Exception as e:
+            log.error(f"Error convirtiendo a PNG: {e}")
+            return {"categoria": "otro", "confianza": 0.0, "razon": f"Error conversion: {e}"}
+        if not png_files:
+            return {"categoria": "otro", "confianza": 0.0, "razon": "Formato no convertible a imagen"}
 
         blob_folder = f"Clasificacion/{adjunto['id']}"
         urls = subir_imagenes_blob(blob_folder, tmp_dir)

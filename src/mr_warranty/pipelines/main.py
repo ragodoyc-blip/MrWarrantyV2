@@ -23,11 +23,13 @@ from mr_warranty.services.prompts import (
     validar_oil_analysis_con_ia,
     validar_photographs_con_ia,
     extraer_fecha_instalacion_parte,
+    extraer_partes_db_installed,
     validar_work_order_con_ia,
     validar_purchase_invoice_con_ia,
+    validar_purchase_invoice_db_installed_con_ia,
 )
 from mr_warranty.domain.validation_standard import ValidacionStandadWC, ValidacionStandartPartes, Stanrate
-from mr_warranty.domain.validation_fc_sf import ValidacionFC_SF, ValidacionCostCoverage_SF, ValidacionStandard
+from mr_warranty.domain.validation_fc_sf import ValidacionFC_SF, ValidacionCostCoverage_SF, ValidacionStandard, es_pc_db_installed
 from mr_warranty.domain.validation_fc import (
     DatosGeneralesCampana,
     ValidacionCampanaGeneral,
@@ -46,6 +48,7 @@ from mr_warranty.adapters.salesforce_client import (
     obtener_coverage_type,
 )
 from mr_warranty.core.ponderaciones import PONDERACIONES_STD, PONDERACIONES_FC, PONDERACIONES_STD_SF, PONDERACIONES_STD_SF_PC
+from mr_warranty.core.ia_cost import iniciar_medicion, resumen as resumen_costo_ia
 from mr_warranty.infrastructure.blob import AdjuntosSQIS
 from mr_warranty.infrastructure.excel_sink import encolar_registro, actualizar_status_masivo, sincronizar_pendientes_excel
 from mr_warranty.infrastructure.sql_storage import is_sql_enabled, get_processed_claim_keys_sql
@@ -53,6 +56,10 @@ from mr_warranty.core.utils import (
     calcular_periodo_plm,
     calcular_score_adjuntos,
     componente_usa_aceite_hidraulico,
+    plm_no_requerido,
+    puntaje_plm_presencia,
+    requiere_factura,
+    usa_prompt_sap,
 )
 
 # Configurar la tabla SQL
@@ -178,24 +185,40 @@ def Analisis(fuente: str = "ambos", dry_run_limit: int | None = None):
 
     df_no_procesados = df_candidatos_procesar[~df_candidatos_procesar["kom_claimnumber"].isin(df_procesado_list)]
 
-    # Filtro Powr WA Standard - bulk excluye PC y otros CoverageType antes de procesar (B2)
+    # Filtro WA Standard + PC DB Installed - bulk excluye otros CoverageType (B2)
     if procesar_salesforce and not df_no_procesados.empty:
         salesforce_mask = df_no_procesados["Plataforma"] == "Salesforce"
         if salesforce_mask.any():
             from mr_warranty.adapters.salesforce_client import obtener_coverage_map
+            from mr_warranty.domain.validation_fc_sf import es_pc_db_installed
 
             try:
                 sf_claim_ids = df_no_procesados.loc[salesforce_mask, "Id"].dropna().astype(str).tolist()
                 coverage_map = obtener_coverage_map(sf_claim_ids)
-                wa_claim_ids = {cid for cid, cov in coverage_map.items() if cov == "WA - Standard Product Warranty"}
+
+                def _pasa_filtro(cid: str) -> bool:
+                    val = coverage_map.get(str(cid))
+                    if isinstance(val, dict):
+                        cov = val.get("coverage_type", "")
+                        ct = val.get("claim_type__c", "")
+                    else:
+                        cov = val or ""
+                        ct = ""
+                    if cov == "WA - Standard Product Warranty":
+                        return True
+                    # PC - Part DB Installed: mismo CoverageType PC pero Claim_Type__c específico.
+                    if cov == "PC - Parts and Components" and es_pc_db_installed(ct):
+                        return True
+                    return False
+
+                keep_ids = {cid for cid in sf_claim_ids if _pasa_filtro(cid)}
                 before = int(salesforce_mask.sum())
-                wa_mask = df_no_procesados["Id"].astype(str).isin(wa_claim_ids)
-                keep_mask = (~salesforce_mask) | wa_mask
+                keep_mask = (~salesforce_mask) | df_no_procesados["Id"].astype(str).isin(keep_ids)
                 df_no_procesados = df_no_procesados[keep_mask].copy()
                 after = int((df_no_procesados["Plataforma"] == "Salesforce").sum())
-                log.info("[WA FILTER] Salesforce WA Standard: %s -> %s (excluidos PC/otros y sin cobertura)", before, after)
+                log.info("[WA FILTER] Salesforce WA + PC DB Installed: %s -> %s (excluidos otros y sin cobertura)", before, after)
                 if after == 0 and before > 0:
-                    log.warning("[WA FILTER] Ningún candidato Salesforce cumple WA Standard - revisa ClaimCoverage")
+                    log.warning("[WA FILTER] Ningún candidato Salesforce cumple WA/PC-DB - revisa ClaimCoverage")
             except Exception as e:
                 log.error("Error filtrando WA Standard en Analisis: %s", e)
 
@@ -354,6 +377,8 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
             log.info("[DRY-RUN] Omitiendo %s | %s - límite %s ya alcanzado", Reclamo, plataforma, dry_run_limit)
             continue
 
+        iniciar_medicion()
+
         if plataforma == "SQIS":
 
             # ── FIELD CAMPAIGN ──────────────────────────────
@@ -453,6 +478,13 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                 continue
 
             if registro_nuevo is not None:
+                costo_ia = resumen_costo_ia()
+                registro_nuevo.update({
+                    "IA calls": costo_ia["calls"],
+                    "IA input tokens": costo_ia["input_tokens"],
+                    "IA output tokens": costo_ia["output_tokens"],
+                    "IA estimated cost USD": costo_ia["cost_usd"],
+                })
                 guardado_sql = encolar_registro(registro_nuevo)
                 destino = "SQL" if guardado_sql else "JSON de respaldo"
                 log.info("Registro guardado en %s: %s", destino, registro_nuevo.get("ClaimNumber"))
@@ -503,11 +535,17 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                 # 0. Obtener CoverageType y Repair Date
                 coverage = obtener_coverage_type(claim_id)
                 coverage_type = coverage.get("coverage_type", "")
+                claim_type__c = (coverage.get("claim_group", "") or "").strip()
                 es_pc = (coverage_type == "PC - Parts and Components")
+                es_pc_db = es_pc_db_installed(claim_type__c)
                 repair_date = obtener_repair_date(claim_id)
 
                 if es_pc:
                     log.info("[%s] CoverageType: PC - Parts and Components", Reclamo)
+                if es_pc_db:
+                    log.info("[%s] PC - Part DB Installed: vigencia invertida + doble factura", Reclamo)
+                if claim_type__c:
+                    log.info("[%s] Claim_Type__c: %s", Reclamo, claim_type__c)
 
                 # 1. Obtener modelo y serial del TSI
                 modelo_serial = (
@@ -583,20 +621,29 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                     log.error("[%s] Error IA TR: %s. Saltando.", Reclamo, e)
                     continue
 
-                # 4. Validar PLM con IA
-                try:
-                    pond_plm = PONDERACIONES_STD_SF_PC["plm"] if es_pc else PONDERACIONES_STD_SF["plm"]
-                    plm_result = validar_adjunto_con_ia(
-                        adjuntos_ia["plm"]["urls_sas"],
-                        modelo_serial["modelo"],
-                        modelo_serial["serial"],
-                        "PLM",
-                        pond_plm,
-                        claim_context=claim_context,
-                    )
-                except Exception as e:
-                    log.error("[%s] Error IA PLM: %s. Saltando.", Reclamo, e)
-                    continue
+                # 4. Validar PLM con IA (o parcial por presencia si no hay URLs legibles)
+                pond_plm = PONDERACIONES_STD_SF_PC["plm"] if es_pc else PONDERACIONES_STD_SF["plm"]
+                plm_urls = adjuntos_ia["plm"]["urls_sas"]
+                plm_titulos = adjuntos_ia["plm"]["titulos"]
+                if plm_no_requerido(claim_type__c):
+                    plm_result = {"score": pond_plm, "reason": "no es requerido PLM."}
+                    log.info("[%s] PLM no requerido (SK/MA): score=%.2f", Reclamo, pond_plm)
+                elif not plm_urls and plm_titulos:
+                    plm_result = puntaje_plm_presencia(plm_titulos, pond_plm)
+                    log.info("[%s] PLM por presencia: score=%.2f", Reclamo, plm_result["score"])
+                else:
+                    try:
+                        plm_result = validar_adjunto_con_ia(
+                            plm_urls,
+                            modelo_serial["modelo"],
+                            modelo_serial["serial"],
+                            "PLM",
+                            pond_plm,
+                            claim_context=claim_context,
+                        )
+                    except Exception as e:
+                        log.error("[%s] Error IA PLM: %s. Saltando.", Reclamo, e)
+                        continue
 
                 # 5. Validar photographs con IA
                 photo_result = {
@@ -629,24 +676,44 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                         log.error("[%s] Error IA Oil Analysis: %s. Se asigna 0.", Reclamo, e)
                         oil_result = {"score": 0, "reason": f"ALERTA: Error validando Oil Analysis: {e}"}
 
-                # 7. Extraer fecha de instalación y validar Work Order / Purchase Invoice
+                # 7. Extraer fecha de instalación (PC normal) o partes failing/installed (PC DB Installed)
                 fecha_instalacion = None
                 fecha_instalacion_reason = "No se pudo determinar la fecha de instalación"
-                if es_pc:
-                    log.info("[%s] Procesando lógica PC - Parts and Components", Reclamo)
-
-                try:
-                    resultado_fi = extraer_fecha_instalacion_parte(
-                        Diccionario_Salesforce_Reclamo,
-                        Diccionario_Chatter if Diccionario_Chatter else {},
-                    )
-                    fecha_instalacion = resultado_fi.get("fecha")
-                    fecha_instalacion_reason = resultado_fi.get("razon", "")
-                    if fecha_instalacion:
-                        log.info("[%s] Fecha instalación: %s", Reclamo, fecha_instalacion)
-                except Exception as e:
-                    log.error("[%s] Error extrayendo fecha instalación: %s", Reclamo, e)
-                    fecha_instalacion_reason = f"Error: {e}"
+                failing_part = ""
+                installed_part = ""
+                partes_reason = ""
+                if es_pc_db:
+                    log.info("[%s] Procesando lógica PC - Part DB Installed (sin fecha, doble factura)", Reclamo)
+                    fecha_instalacion_reason = "No aplica para PC DB Installed, se valida con doble factura."
+                    try:
+                        partes = extraer_partes_db_installed(
+                            Diccionario_Salesforce_Reclamo,
+                            Diccionario_Chatter if Diccionario_Chatter else {},
+                            causal_part=component,
+                            product_code=Diccionario_Salesforce_Reclamo.get("Product_Code__c", "") or "",
+                        )
+                        failing_part = partes.get("failing", "")
+                        installed_part = partes.get("installed", "")
+                        partes_reason = partes.get("razon", "")
+                        log.info("[%s] Partes DB: falla=%s instalada=%s", Reclamo, failing_part, installed_part)
+                    except Exception as e:
+                        log.error("[%s] Error extrayendo partes DB Installed: %s", Reclamo, e)
+                        partes_reason = f"Error: {e}"
+                else:
+                    if es_pc:
+                        log.info("[%s] Procesando lógica PC - Parts and Components", Reclamo)
+                    try:
+                        resultado_fi = extraer_fecha_instalacion_parte(
+                            Diccionario_Salesforce_Reclamo,
+                            Diccionario_Chatter if Diccionario_Chatter else {},
+                        )
+                        fecha_instalacion = resultado_fi.get("fecha")
+                        fecha_instalacion_reason = resultado_fi.get("razon", "")
+                        if fecha_instalacion:
+                            log.info("[%s] Fecha instalación: %s", Reclamo, fecha_instalacion)
+                    except Exception as e:
+                        log.error("[%s] Error extrayendo fecha instalación: %s", Reclamo, e)
+                        fecha_instalacion_reason = f"Error: {e}"
 
                 claim_validation_data = {
                     **Diccionario_Salesforce_Reclamo,
@@ -654,6 +721,9 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                     "Serial": modelo_serial.get("serial", ""),
                     "CausalPart__c": component,
                     "PartInstallationDate": fecha_instalacion or "",
+                    "FailingPart__c": failing_part or component,
+                    "InstalledPart__c": installed_part,
+                    "PartesDBReason": partes_reason,
                     "Parts_Requested_Quantity__c": coverage.get("parts_quantity", 0),
                     "RepairDate": repair_date or "",
                 }
@@ -668,21 +738,77 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                     log.error("[%s] Error validando Work Order: %s", Reclamo, e)
                     work_order_result = {"score": 0, "reason": f"ALERTA: Error validando Work Order: {e}"}
 
-                try:
-                    purchase_invoice_result = validar_purchase_invoice_con_ia(
-                        adjuntos_ia["purchase_invoice"]["urls_sas"],
-                        claim_validation_data,
-                    )
-                    log.info("[%s] Purchase Invoice: score=%.2f", Reclamo, purchase_invoice_result["score"])
-                except Exception as e:
-                    log.error("[%s] Error validando Purchase Invoice: %s", Reclamo, e)
-                    purchase_invoice_result = {"score": 0, "reason": f"ALERTA: Error validando Purchase Invoice: {e}"}
+                # Gate: sin partes solicitadas en el Claim no se exigen facturas.
+                # PC DB Installed siempre exige doble factura (falla + instalada).
+                if es_pc_db:
+                    try:
+                        invoice_urls = adjuntos_ia["purchase_invoice"]["urls_sas"]
+                        invoice_docs = len(adjuntos_ia["purchase_invoice"].get("titulos", []))
+                        if not invoice_urls and usa_prompt_sap(claim_validation_data):
+                            # Fallback: la captura SAP suele venir como imagen (fotografias).
+                            fotos_ia = descargar_y_subir_adjuntos_ia(
+                                claim_id,
+                                tsi_id,
+                                ["fotografias"],
+                                classifications=clasif,
+                                attachment_details=adjuntos_validacion.get("classification_details", {}),
+                            )
+                            invoice_urls = fotos_ia["fotografias"]["urls_sas"]
+                            invoice_docs = len(fotos_ia["fotografias"].get("titulos", []))
+                            if invoice_urls:
+                                log.info("[%s] Invoice DB fallback a fotografias (posible captura SAP)", Reclamo)
+                        purchase_invoice_result = validar_purchase_invoice_db_installed_con_ia(
+                            invoice_urls,
+                            claim_validation_data,
+                            num_docs=invoice_docs,
+                        )
+                        if partes_reason:
+                            purchase_invoice_result["reason"] = (
+                                f"[Partes: falla={failing_part or '?'} instalada={installed_part or '?'}: {partes_reason}] "
+                                + str(purchase_invoice_result.get("reason", ""))
+                            )
+                        log.info("[%s] Purchase Invoice DB: score=%.2f", Reclamo, purchase_invoice_result["score"])
+                    except Exception as e:
+                        log.error("[%s] Error validando Purchase Invoice DB: %s", Reclamo, e)
+                        purchase_invoice_result = {"score": 0, "reason": f"ALERTA: Error validando Purchase Invoice DB: {e}"}
+                elif not requiere_factura(Diccionario_Salesforce_Reclamo.get("PartsRequestedQuantity__c")):
+                    pond_inv = PONDERACIONES_STD_SF_PC["purchase_invoice"] if es_pc else PONDERACIONES_STD_SF["purchase_invoice"]
+                    purchase_invoice_result = {
+                        "score": pond_inv,
+                        "reason": "no es requerida la factura, partes solicitadas = 0.",
+                    }
+                    log.info("[%s] Purchase Invoice no requerida (partes=0): score=%.2f", Reclamo, pond_inv)
+                else:
+                    try:
+                        invoice_urls = adjuntos_ia["purchase_invoice"]["urls_sas"]
+                        if not invoice_urls and usa_prompt_sap(claim_validation_data):
+                            # Fallback: la captura SAP suele venir como imagen (fotografias).
+                            fotos_ia = descargar_y_subir_adjuntos_ia(
+                                claim_id,
+                                tsi_id,
+                                ["fotografias"],
+                                classifications=clasif,
+                                attachment_details=adjuntos_validacion.get("classification_details", {}),
+                            )
+                            invoice_urls = fotos_ia["fotografias"]["urls_sas"]
+                            if invoice_urls:
+                                log.info("[%s] Invoice fallback a fotografias (posible captura SAP)", Reclamo)
+                        purchase_invoice_result = validar_purchase_invoice_con_ia(
+                            invoice_urls,
+                            claim_validation_data,
+                        )
+                        log.info("[%s] Purchase Invoice: score=%.2f", Reclamo, purchase_invoice_result["score"])
+                    except Exception as e:
+                        log.error("[%s] Error validando Purchase Invoice: %s", Reclamo, e)
+                        purchase_invoice_result = {"score": 0, "reason": f"ALERTA: Error validando Purchase Invoice: {e}"}
 
-                # 8. Validación estándar (con lógica PC si aplica)
+                # 8. Validación estándar (PC normal, PC DB invertida y pre-commissioning SK/MA si aplica)
                 DiccionarioValidacionSTD = ValidacionStandard(
                     Diccionario_Salesforce_Reclamo,
                     es_pc=es_pc,
                     fecha_instalacion_parte=fecha_instalacion,
+                    claim_type__c=claim_type__c,
+                    es_pc_db=es_pc_db,
                 )
 
                 # 9. Seleccionar ponderaciones según PC o FW normal
@@ -706,6 +832,7 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                     "Status": Diccionario_Salesforce_Reclamo.get("Status"),
                     "TipoGarantia": "Factory Warranty",
                     "Coverage Type": coverage_type,
+                    "Claim_Type__c": claim_type__c,
                     "Repair Date": repair_date,
                     "Within standard warranty": DiccionarioValidacionSTD.get("within_standard_warranty_ponderacion"),
                     "Within standard warranty reason": DiccionarioValidacionSTD.get("within_standard_warranty_reason"),
@@ -730,6 +857,9 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                     "Serial Number": modelo_serial.get("serial", ""),
                     "Part Installation Date": fecha_instalacion,
                     "Part Installation Date reason": fecha_instalacion_reason,
+                    "Failing Part": failing_part,
+                    "Installed Part": installed_part,
+                    "Partes DB reason": partes_reason,
                     "Work Order": work_order_result["score"],
                     "Work Order reason": work_order_result["reason"],
                     "Invoices": purchase_invoice_result["score"],
@@ -738,6 +868,13 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                 nuevos_registros.append(registro_nuevo)
 
             if registro_nuevo is not None:
+                costo_ia = resumen_costo_ia()
+                registro_nuevo.update({
+                    "IA calls": costo_ia["calls"],
+                    "IA input tokens": costo_ia["input_tokens"],
+                    "IA output tokens": costo_ia["output_tokens"],
+                    "IA estimated cost USD": costo_ia["cost_usd"],
+                })
                 guardado_sql = encolar_registro(registro_nuevo)
                 destino = "SQL" if guardado_sql else "JSON de respaldo"
                 log.info("[%s] Registro guardado en %s", Reclamo, destino)
