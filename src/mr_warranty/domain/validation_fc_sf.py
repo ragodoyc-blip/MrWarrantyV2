@@ -134,7 +134,16 @@ CLAIM_TYPES_SIN_VIGENCIA = frozenset({
     "SK - Repair prior to commissioning",
     "S1 - Standard Warranty",
     "MA - Missing or Damaged Part prior to commissioning",
+    "PA - Special Policy",
 })
+
+# PA - Special Policy: misma matriz que S1 (within = No aplica) + SPCR informativo 0-1.
+CLAIM_TYPE_PA_SPECIAL_POLICY = "PA - Special Policy"
+
+
+def es_pa_special_policy(claim_type__c: str | None) -> bool:
+    """Indica si el reclamo es PA - Special Policy (matriz S1 + SPCR informativo)."""
+    return str(claim_type__c or "").strip().lower() == CLAIM_TYPE_PA_SPECIAL_POLICY.lower()
 
 # PC - Part DB Installed: vigencia invertida sobre el equipo.
 # El equipo NO debe estar en garantía: dentro de 1 año = 0, sobre 1 año = 100%.

@@ -848,7 +848,7 @@ def clasificar_documento_adjunto(
 ) -> dict:
     """
     Clasifica un adjunto de Salesforce leyendo su contenido con Azure OpenAI.
-    Categorias: reporte_tecnico, plm, fotografias, analisis_aceite, work_order, purchase_invoice, otro
+    Categorias: reporte_tecnico, plm, fotografias, analisis_aceite, work_order, purchase_invoice, special_policy, otro
     """
     if not urls_sas:
         return {"categoria": "otro", "confianza": 0.0, "razon": "Sin URLs"}
@@ -870,6 +870,7 @@ def clasificar_documento_adjunto(
     - "analisis_aceite": Oil analysis, analisis de aceite, muestra de lubricante, laboratorio de aceite
     - "work_order": Work Order, Service Order, orden de trabajo, repair order
     - "purchase_invoice": Purchase Invoice, factura de compra, invoice de una pieza, recorte/pantallazo SAP (Visual.KCC Orden Garantia, resumen de componentes)
+    - "special_policy": Special Policy Consideration Request & Authorization (SPCR, MAN38.1-F7), formulario de politica especial Komatsu
     - "otro": Facturas, ordenes de compra, work orders, certificados, cualquier otro documento
 
     Contexto del Claim:
@@ -877,7 +878,7 @@ def clasificar_documento_adjunto(
     - Numero de serie esperado: {serial_esperado}
 
     Responde SOLO un diccionario Python valido con:
-    - categoria: una de las 7 opciones más "otro"
+    - categoria: una de las 8 opciones más "otro"
     - confianza: float entre 0.0 y 1.0
     - razon: explicacion breve (max 100 caracteres)
     """
@@ -1208,3 +1209,78 @@ def validar_purchase_invoice_db_installed_con_ia(
 
     result = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=0.10)
     return score_from_criteria(result, 0.10, criteria_keys)
+
+
+# =============================================================
+# 14) Validar formulario SPCR para PA - Special Policy (informativo 0-1)
+# =============================================================
+# El SPCR NO resta peso a ningún criterio: es solo informativo en escala 0-1.
+SPCR_MAX = 1.0
+
+
+def validar_spcr_con_ia(
+    urls_sas: list[str],
+    modelo: str,
+    serial: str,
+    claim_name: str = "",
+) -> dict:
+    """Valida el formulario Special Policy Consideration Request & Authorization.
+
+    Formato único para todo reclamo Special Policy (MAN38.1-F7).
+    Tres criterios proporcionales (cada uno 1/3):
+    1. form_match: el documento es reconocible como SPCR (cabecera
+       "Special Policy Consideration Request & Authorization", Document ID
+       MAN38.1-F7, secciones A-G).
+    2. model_match: el modelo de la Sección A (campo 6) coincide.
+    3. serial_match: el número de serie de la Sección A (campo 7) coincide.
+
+    Retorna: {'score': <float 0-1>, 'reason': '<texto>'}
+    """
+    if not urls_sas:
+        return {"score": 0.0, "reason": "No se encontró formulario SPCR entre los adjuntos"}
+
+    from mr_warranty.core.utils import seleccionar_imagenes_para_ia
+
+    system = (
+        "Eres un analista tecnico de Komatsu. "
+        "Debes responder SIEMPRE en formato diccionario Python. "
+        "Formato: {'score': <float>, 'reason': '<texto>'}"
+    )
+
+    user_text = f"""
+    Analiza las imagenes adjuntas buscando el formulario
+    "Special Policy Consideration Request & Authorization" (Document ID MAN38.1-F7).
+
+    Informacion del Claim {claim_name}:
+    - Modelo esperado (Seccion A, campo 6): {modelo}
+    - Numero de serie esperado (Seccion A, campo 7): {serial}
+
+    Evalua tres criterios independientes:
+    1. El documento es reconocible como formulario SPCR (cabecera, Document ID MAN38.1-F7, secciones A-G).
+    2. El modelo de la Seccion A coincide con el modelo esperado.
+    3. El numero de serie de la Seccion A coincide con la serie esperada.
+
+    Asigna score = criterios cumplidos / 3 (entre 0 y 1).
+    Devuelve tambien criteria con estas claves booleanas exactas:
+    form_match, model_match, serial_match.
+    El score debe ser el valor absoluto entre 0 y 1.0.
+    No supongas datos que no sean visibles. Explica criterios cumplidos, faltantes y contradicciones.
+    Responde SOLO un diccionario Python valido.
+    """
+    criteria_keys = ["form_match", "model_match", "serial_match"]
+
+    urls_limitadas = seleccionar_imagenes_para_ia(urls_sas, max_images=5)
+
+    messages = [
+        {"role": "system", "content": system},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_text},
+                *[{"type": "image_url", "image_url": {"url": url}} for url in urls_limitadas],
+            ],
+        },
+    ]
+
+    result = call_azure_gpt(messages, deployment="gpt-4.1", max_ponderacion=SPCR_MAX)
+    return score_from_criteria(result, SPCR_MAX, criteria_keys)

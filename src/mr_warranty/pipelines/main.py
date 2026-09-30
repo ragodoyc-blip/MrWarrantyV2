@@ -27,9 +27,10 @@ from mr_warranty.services.prompts import (
     validar_work_order_con_ia,
     validar_purchase_invoice_con_ia,
     validar_purchase_invoice_db_installed_con_ia,
+    validar_spcr_con_ia,
 )
 from mr_warranty.domain.validation_standard import ValidacionStandadWC, ValidacionStandartPartes, Stanrate
-from mr_warranty.domain.validation_fc_sf import ValidacionFC_SF, ValidacionCostCoverage_SF, ValidacionStandard, es_pc_db_installed
+from mr_warranty.domain.validation_fc_sf import ValidacionFC_SF, ValidacionCostCoverage_SF, ValidacionStandard, es_pa_special_policy, es_pc_db_installed
 from mr_warranty.domain.validation_fc import (
     DatosGeneralesCampana,
     ValidacionCampanaGeneral,
@@ -185,12 +186,12 @@ def Analisis(fuente: str = "ambos", dry_run_limit: int | None = None):
 
     df_no_procesados = df_candidatos_procesar[~df_candidatos_procesar["kom_claimnumber"].isin(df_procesado_list)]
 
-    # Filtro WA Standard + PC DB Installed - bulk excluye otros CoverageType (B2)
+    # Filtro WA Standard + PC DB Installed + PA Special Policy - bulk excluye otros (B2)
     if procesar_salesforce and not df_no_procesados.empty:
         salesforce_mask = df_no_procesados["Plataforma"] == "Salesforce"
         if salesforce_mask.any():
             from mr_warranty.adapters.salesforce_client import obtener_coverage_map
-            from mr_warranty.domain.validation_fc_sf import es_pc_db_installed
+            from mr_warranty.domain.validation_fc_sf import es_pa_special_policy, es_pc_db_installed
 
             try:
                 sf_claim_ids = df_no_procesados.loc[salesforce_mask, "Id"].dropna().astype(str).tolist()
@@ -209,6 +210,9 @@ def Analisis(fuente: str = "ambos", dry_run_limit: int | None = None):
                     # PC - Part DB Installed: mismo CoverageType PC pero Claim_Type__c específico.
                     if cov == "PC - Parts and Components" and es_pc_db_installed(ct):
                         return True
+                    # PA - Special Policy: matriz S1 + SPCR informativo.
+                    if cov == "PA - Special Policy" and es_pa_special_policy(ct):
+                        return True
                     return False
 
                 keep_ids = {cid for cid in sf_claim_ids if _pasa_filtro(cid)}
@@ -216,9 +220,9 @@ def Analisis(fuente: str = "ambos", dry_run_limit: int | None = None):
                 keep_mask = (~salesforce_mask) | df_no_procesados["Id"].astype(str).isin(keep_ids)
                 df_no_procesados = df_no_procesados[keep_mask].copy()
                 after = int((df_no_procesados["Plataforma"] == "Salesforce").sum())
-                log.info("[WA FILTER] Salesforce WA + PC DB Installed: %s -> %s (excluidos otros y sin cobertura)", before, after)
+                log.info("[WA FILTER] Salesforce WA + PC DB + PA: %s -> %s (excluidos otros y sin cobertura)", before, after)
                 if after == 0 and before > 0:
-                    log.warning("[WA FILTER] Ningún candidato Salesforce cumple WA/PC-DB - revisa ClaimCoverage")
+                    log.warning("[WA FILTER] Ningún candidato Salesforce cumple WA/PC-DB/PA - revisa ClaimCoverage")
             except Exception as e:
                 log.error("Error filtrando WA Standard en Analisis: %s", e)
 
@@ -538,12 +542,15 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                 claim_type__c = (coverage.get("claim_group", "") or "").strip()
                 es_pc = (coverage_type == "PC - Parts and Components")
                 es_pc_db = es_pc_db_installed(claim_type__c)
+                es_pa = es_pa_special_policy(claim_type__c)
                 repair_date = obtener_repair_date(claim_id)
 
                 if es_pc:
                     log.info("[%s] CoverageType: PC - Parts and Components", Reclamo)
                 if es_pc_db:
                     log.info("[%s] PC - Part DB Installed: vigencia invertida + doble factura", Reclamo)
+                if es_pa:
+                    log.info("[%s] PA - Special Policy: matriz S1 + SPCR informativo", Reclamo)
                 if claim_type__c:
                     log.info("[%s] Claim_Type__c: %s", Reclamo, claim_type__c)
 
@@ -582,6 +589,7 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                         "serial": modelo_serial.get("serial", ""),
                     },
                     es_pc=es_pc,
+                    es_pa=es_pa,
                 )
                 clasif = adjuntos_validacion["clasificacion"]
 
@@ -594,6 +602,9 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                         "work_order",
                         "purchase_invoice",
                     ]
+                    if es_pa:
+                        # PA: además se descarga el formulario SPCR para validación 0-1.
+                        categorias_ia.append("special_policy")
 
                     adjuntos_ia = descargar_y_subir_adjuntos_ia(
                         claim_id,
@@ -802,6 +813,22 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                         log.error("[%s] Error validando Purchase Invoice: %s", Reclamo, e)
                         purchase_invoice_result = {"score": 0, "reason": f"ALERTA: Error validando Purchase Invoice: {e}"}
 
+                # 7b. SPCR informativo 0-1 (solo PA - Special Policy, no resta peso).
+                if es_pa:
+                    try:
+                        spcr_result = validar_spcr_con_ia(
+                            adjuntos_ia["special_policy"]["urls_sas"],
+                            modelo_serial.get("modelo", ""),
+                            modelo_serial.get("serial", ""),
+                            claim_name=Diccionario_Salesforce_Reclamo.get("Name", "") or Reclamo,
+                        )
+                        log.info("[%s] SPCR: score=%.2f", Reclamo, spcr_result["score"])
+                    except Exception as e:
+                        log.error("[%s] Error validando SPCR: %s", Reclamo, e)
+                        spcr_result = {"score": 0.0, "reason": f"ALERTA: Error validando SPCR: {e}"}
+                else:
+                    spcr_result = {"score": None, "reason": None}
+
                 # 8. Validación estándar (PC normal, PC DB invertida y pre-commissioning SK/MA si aplica)
                 DiccionarioValidacionSTD = ValidacionStandard(
                     Diccionario_Salesforce_Reclamo,
@@ -864,6 +891,8 @@ def main(fuente: str = "ambos", dry_run_limit: int | None = None):
                     "Work Order reason": work_order_result["reason"],
                     "Invoices": purchase_invoice_result["score"],
                     "Invoices reason": purchase_invoice_result["reason"],
+                    "SPCR": spcr_result["score"],
+                    "SPCR reason": spcr_result["reason"],
                 }
                 nuevos_registros.append(registro_nuevo)
 

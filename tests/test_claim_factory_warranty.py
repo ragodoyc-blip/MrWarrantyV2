@@ -46,7 +46,7 @@ from mr_warranty.core.utils import (
     usa_prompt_sap,
 )
 from mr_warranty.domain.validation_fc_sf import ValidacionStandard
-from mr_warranty.domain.validation_fc_sf import es_pc_db_installed
+from mr_warranty.domain.validation_fc_sf import es_pa_special_policy, es_pc_db_installed
 from mr_warranty.services.prompts import (
     extraer_fecha_instalacion_parte,
     extraer_partes_db_installed,
@@ -54,6 +54,7 @@ from mr_warranty.services.prompts import (
     validar_oil_analysis_con_ia,
     validar_purchase_invoice_con_ia,
     validar_purchase_invoice_db_installed_con_ia,
+    validar_spcr_con_ia,
     validar_work_order_con_ia,
 )
 
@@ -81,6 +82,7 @@ def evaluar_factory_warranty(claim_number: str) -> dict:
     claim_type__c = (coverage.get("claim_group", "") or "").strip()
     es_pc = (coverage_type == "PC - Parts and Components")
     es_pc_db = es_pc_db_installed(claim_type__c)
+    es_pa = es_pa_special_policy(claim_type__c)
     repair_date = obtener_repair_date(claim_id)
 
     # 1. Modelo y serial del TSI + Chatter
@@ -122,14 +124,18 @@ def evaluar_factory_warranty(claim_number: str) -> dict:
             "serial": modelo_serial.get("serial", ""),
         },
         es_pc=es_pc,
+        es_pa=es_pa,
     )
     clasif = adjuntos_validacion["clasificacion"]
 
     # 2. Descargar adjuntos y subir a Blob
+    categorias_descarga = ["reporte_tecnico", "plm", "analisis_aceite", "work_order", "purchase_invoice"]
+    if es_pa:
+        categorias_descarga.append("special_policy")
     adjuntos_ia = descargar_y_subir_adjuntos_ia(
         claim_id,
         tsi_id,
-        ["reporte_tecnico", "plm", "analisis_aceite", "work_order", "purchase_invoice"],
+        categorias_descarga,
         classifications=clasif,
         attachment_details=adjuntos_validacion.get("classification_details", {}),
     )
@@ -301,6 +307,20 @@ def evaluar_factory_warranty(claim_number: str) -> dict:
         except Exception as e:
             purchase_invoice_result = {"score": 0, "reason": f"ALERTA: Error validando Purchase Invoice: {e}"}
 
+    # 7b. SPCR informativo 0-1 (solo PA - Special Policy, no resta peso).
+    if es_pa:
+        try:
+            spcr_result = validar_spcr_con_ia(
+                adjuntos_ia["special_policy"]["urls_sas"],
+                modelo_serial.get("modelo", ""),
+                modelo_serial.get("serial", ""),
+                claim_name=dic.get("Name", "") or claim_number,
+            )
+        except Exception as e:
+            spcr_result = {"score": 0.0, "reason": f"ALERTA: Error validando SPCR: {e}"}
+    else:
+        spcr_result = {"score": None, "reason": None}
+
     # 8-10. Validacion estandar + scores adjuntos
     valid_std = ValidacionStandard(
         dic,
@@ -351,6 +371,8 @@ def evaluar_factory_warranty(claim_number: str) -> dict:
         "Work Order reason": work_order_result["reason"],
         "Invoices": purchase_invoice_result["score"],
         "Invoices reason": purchase_invoice_result["reason"],
+        "SPCR": spcr_result["score"],
+        "SPCR reason": spcr_result["reason"],
     }
     costo_ia = resumen_costo_ia()
     registro.update({
@@ -374,6 +396,7 @@ def _imprimir(registro: dict) -> None:
         "ADJUNTOS": ["Attachments PLM", "Attachments Oil Analysis", "Attachments Datapacks",
                      "Attachments Technical Report SF", "Attachments Photographs SF"],
         "DOCUMENTOS": ["Work Order", "Invoices"],
+        "SPCR (informativo 0-1)": ["SPCR"],
     }
     for titulo, claves in secciones.items():
         print(f"--- {titulo} ---")

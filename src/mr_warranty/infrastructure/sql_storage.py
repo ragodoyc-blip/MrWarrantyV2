@@ -68,11 +68,18 @@ KEY_TO_DB_COLUMN = {
     "Attachments Technical Report SF reason": "attachments_technical_report_sf_reason",
     "Attachments Photographs SF": "attachments_photographs_sf",
     "Attachments Photographs SF reason": "attachments_photographs_sf_reason",
+    # ── SPCR informativo 0-1 para PA - Special Policy (no resta peso) ──
+    "SPCR": "attachments_special_policy",
+    "SPCR reason": "attachments_special_policy_reason",
     "Total Adjuntos": "total_adjuntos",
     "Adjuntos en Claim": "adjuntos_en_claim",
     "Adjuntos en Case": "adjuntos_en_case",
+    "Claim_Type__c": "claim_type__c",
+    "IA calls": "ia_calls",
+    "IA input tokens": "ia_input_tokens",
+    "IA output tokens": "ia_output_tokens",
+    "IA estimated cost USD": "ia_estimated_cost_usd",
 }
-
 SCORE_COLUMNS = {
     "fc_expiration",
     "repair_deadline",
@@ -94,6 +101,19 @@ SCORE_COLUMNS = {
     "attachments_datapacks",
     "attachments_technical_report_sf",
     "attachments_photographs_sf",
+    # ── SPCR informativo 0-1 (PA) ──
+    "attachments_special_policy",
+    # ── Costo IA ──
+    "ia_estimated_cost_usd",
+}
+
+INT_COLUMNS = {
+    "total_adjuntos",
+    "adjuntos_en_claim",
+    "adjuntos_en_case",
+    "ia_calls",
+    "ia_input_tokens",
+    "ia_output_tokens",
 }
 
 DATE_COLUMNS = {
@@ -157,11 +177,18 @@ UPSERT_COLUMNS = [
     "serial_number",
     "submitted_date",
     "coverage_type",
+    "claim_type__c",
     "repair_date",
     "part_installation_date",
     "part_installation_date_reason",
     "purchase_invoice",
     "purchase_invoice_reason",
+    "attachments_special_policy",
+    "attachments_special_policy_reason",
+    "ia_calls",
+    "ia_input_tokens",
+    "ia_output_tokens",
+    "ia_estimated_cost_usd",
     "raw_payload_json",
 ]
 
@@ -231,6 +258,24 @@ def _to_float_or_none(value):
         return None
 
 
+def _to_int_or_none(value):
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, float):
+        if math.isnan(value):
+            return None
+        return int(value)
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "nat", "none"}:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
 def _normalize_record(record):
     normalized = {col: None for col in UPSERT_COLUMNS}
 
@@ -242,6 +287,8 @@ def _normalize_record(record):
             normalized[col] = _to_datetime_or_none(value)
         elif col in SCORE_COLUMNS:
             normalized[col] = _to_float_or_none(value)
+        elif col in INT_COLUMNS:
+            normalized[col] = _to_int_or_none(value)
         else:
             if value is None:
                 normalized[col] = None
@@ -321,11 +368,18 @@ BEGIN
         serial_number NVARCHAR(100) NULL,
         submitted_date DATETIMEOFFSET NULL,
         coverage_type NVARCHAR(100) NULL,
+        claim_type__c NVARCHAR(100) NULL,
         repair_date DATETIMEOFFSET NULL,
         part_installation_date DATETIMEOFFSET NULL,
         part_installation_date_reason NVARCHAR(MAX) NULL,
         purchase_invoice DECIMAL(10,4) NULL,
         purchase_invoice_reason NVARCHAR(MAX) NULL,
+        attachments_special_policy DECIMAL(10,4) NULL,
+        attachments_special_policy_reason NVARCHAR(MAX) NULL,
+        ia_calls INT NULL,
+        ia_input_tokens BIGINT NULL,
+        ia_output_tokens BIGINT NULL,
+        ia_estimated_cost_usd DECIMAL(10,4) NULL,
         raw_payload_json NVARCHAR(MAX) NULL,
         created_at DATETIME2 NOT NULL CONSTRAINT DF_reclamos_created_at DEFAULT SYSUTCDATETIME(),
         updated_at DATETIME2 NOT NULL CONSTRAINT DF_reclamos_updated_at DEFAULT SYSUTCDATETIME(),

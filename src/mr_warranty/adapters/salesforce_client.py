@@ -251,10 +251,10 @@ def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
     """
     Clasifica adjuntos por reglas deterministicas (sin IA).
 
-    Solo PLM y datapacks se rutean por nombre (keywords). Los videos van a
-    fotografias por extension. Todo lo demas lo clasifica la IA por contenido
-    en validar_adjuntos_requeridos. Retorna dict con las 7 categorias
-    (las no ruteadas por reglas quedan vacias para la IA).
+    Solo PLM, datapacks y special_policy se rutean por nombre (keywords).
+    Los videos van a fotografias por extension. Todo lo demas lo clasifica
+    la IA por contenido en validar_adjuntos_requeridos. Retorna dict con las
+    8 categorias (las no ruteadas por reglas quedan vacias para la IA).
     """
     classifications = {
         "plm": [],
@@ -264,6 +264,7 @@ def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
         "fotografias": [],
         "work_order": [],
         "purchase_invoice": [],
+        "special_policy": [],
     }
 
     keywords = {
@@ -276,6 +277,10 @@ def clasificar_adjuntos(adjuntos: list[dict]) -> dict:
         "datapacks": [
             "dsc_", "datapack", "dsc", "alarmfile", "im2", "komtrax",
             "data ", "data_", "vhms", "vims", "vids", "ge_", "plm_ht", "komtrax",
+        ],
+        "special_policy": [
+            "special policy", "spcr", "man38.1-f7", "man38.1",
+            "consideration request", "policy consideration",
         ],
     }
 
@@ -302,6 +307,7 @@ def validar_adjuntos_requeridos(
     tsi_id: str | None,
     claim_data: dict | None = None,
     es_pc: bool = False,
+    es_pa: bool = False,
 ) -> dict:
     """
     Valida la presencia de documentos requeridos en un claim de Salesforce.
@@ -389,6 +395,9 @@ def validar_adjuntos_requeridos(
         "reporte_tecnico",
     ]
     required_categories.extend(["work_order", "purchase_invoice"])
+    if es_pa:
+        # PA - Special Policy: además se requiere el formulario SPCR.
+        required_categories.append("special_policy")
     total_required = len(required_categories)
     found = sum(1 for category in required_categories if classifications.get(category))
 
@@ -671,7 +680,7 @@ def clasificar_adjunto_con_ia(adjunto: dict, claim_data: dict | None = None) -> 
     lo sube a Blob y pregunta a Azure OpenAI que tipo de documento es.
 
     Retorna: {
-        "categoria": "reporte_tecnico|plm|fotografias|analisis_aceite|otro",
+        "categoria": "reporte_tecnico|plm|fotografias|analisis_aceite|work_order|purchase_invoice|special_policy|otro",
         "confianza": 0.0-1.0,
         "razon": "..."
     }

@@ -26,6 +26,15 @@ Variante de PC con `CoverageType = PC - Parts and Components` y `Claim_Type__c =
 - Ambas partes pueden venir solo en texto libre (`Correction__c`, `Cause__c`, `Description`, `Resolution_Details__c`, Chatter); los campos `CausalPart__c` / `Product_Code__c` se usan solo como pista.
 - Repair/Claim deadline, informe técnico, PLM, Oil, Datapacks y Work Order mantienen la lógica normal.
 
+### PA - Special Policy
+
+Variante con `CoverageType = PA - Special Policy` y `Claim_Type__c = PA - Special Policy`:
+
+- Misma matriz y ponderaciones que S1 - Standard Warranty (`within` = 15% con `No aplica.`; resto idéntico).
+- Adjunto adicional: formulario `Special Policy Consideration Request & Authorization` (`MAN38.1-F7`, formato único para todo reclamo PA). Solo se evalúa presencia/contenido: debe coincidir modelo (Sección A campo 6) y número de serie (Sección A campo 7).
+- El SPCR es **informativo 0–1** (3 criterios proporcionales: formulario reconocible + modelo + serie) y **no resta peso** a ningún criterio.
+- Se guarda en 2 columnas nuevas: `attachments_special_policy` (puntaje) y `attachments_special_policy_reason` (motivo), igual que los otros análisis.
+
 ## Ponderaciones
 
 | Criterio | Ponderación |
@@ -65,7 +74,7 @@ Para PC - Part DB Installed (vigencia invertida del equipo):
 - Si han transcurrido 366 días o más (equipo fuera de garantía), obtiene el puntaje máximo (15%).
 - No se calcula vigencia de pieza; Salesforce la valida al crear el claim.
 
-Para SK - Repair prior to commissioning, S1 - Standard Warranty y MA - Missing or Damaged Part prior to commissioning:
+Para SK - Repair prior to commissioning, S1 - Standard Warranty, MA - Missing or Damaged Part prior to commissioning y PA - Special Policy:
 
 - `within_standard_warranty` siempre obtiene el puntaje máximo (15%) con razón `No aplica.`.
 - El resto del análisis se mantiene: fechas, documentos adjuntos, Work Order e Invoice.
