@@ -100,6 +100,75 @@ def seleccionar_imagenes_para_ia(urls_sas: list[str], max_images: int = 10) -> l
     return seleccionadas[:max_images]
 
 
+def puntaje_plm_presencia(titulos: list[str], ponderacion: float) -> dict:
+    """Puntaje parcial de PLM por presencia solo por nombre.
+
+    Se usa cuando hay archivos clasificados como PLM pero ninguno dejo
+    URLs legibles para la IA (ej. ZIPs). Otorga la mitad de la ponderacion.
+    """
+    nombres = ", ".join(t for t in (titulos or []) if t) or "sin detalle"
+    return {
+        "score": round((ponderacion or 0) * 0.5, 4),
+        "reason": f"PLM presente solo por nombre ({nombres}); formato no legible por IA; puntaje parcial por presencia",
+    }
+
+
+# Claim_Type__c exentos de PLM: puntaje maximo sin validacion.
+CLAIM_TYPES_SIN_PLM = frozenset({
+    "sk - repair prior to commissioning",
+    "ma - missing or damaged part prior to commissioning",
+})
+
+
+def plm_no_requerido(claim_type__c: str | None) -> bool:
+    """Indica si el PLM no es requerido (SK/MA: puntaje maximo directo)."""
+    return str(claim_type__c or "").strip().lower() in CLAIM_TYPES_SIN_PLM
+
+
+def es_pais_cl(claim_data: dict | None) -> bool:
+    """Indica si el reclamo es de Chile (Claim_country__c = CL).
+
+    Normaliza mayusculas y espacios. Retorna False si falta el dato.
+    """
+    pais = ((claim_data or {}).get("Claim_country__c") or "")
+    return str(pais).strip().upper() == "CL"
+
+
+# Oficinas de Chile para el fallback SAP cuando Claim_country__c viene vacio.
+OFICINAS_CHILE = frozenset({"komatsu chile", "jgi chile"})
+
+
+def usa_prompt_sap(claim_data: dict | None) -> bool:
+    """Indica si el invoice debe evaluarse con la variante SAP.
+
+    True si Claim_country__c = CL, o si el pais viene vacio y el
+    Case trae Sales_Office__c de Chile (Komatsu Chile / JGI Chile).
+    """
+    if es_pais_cl(claim_data):
+        return True
+    pais = str(((claim_data or {}).get("Claim_country__c") or "")).strip()
+    if pais:
+        return False
+    oficina = str(((claim_data or {}).get("Sales_Office__c") or "")).strip().lower()
+    return oficina in OFICINAS_CHILE
+
+
+def requiere_factura(cantidad) -> bool:
+    """Indica si corresponde analizar facturas según Claim.PartsRequestedQuantity__c.
+
+    True solo si es numérico > 0. Cero, vacío, None, NaN o ilegible → False.
+    """
+    if cantidad is None or isinstance(cantidad, bool):
+        return False
+    try:
+        valor = float(str(cantidad).strip())
+    except (TypeError, ValueError):
+        return False
+    if valor != valor:  # NaN
+        return False
+    return valor > 0
+
+
 def calcular_score_adjuntos(
     clasif: dict,
     pond: dict,

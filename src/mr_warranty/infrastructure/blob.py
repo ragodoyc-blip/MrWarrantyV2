@@ -205,6 +205,119 @@ def excel_to_imagenes(excel_file_path: str, output_folder: str) -> list[str]:
         raise ValueError(f"No se pudo procesar Excel: {excel_file_path}. Error: {e}")
 
 
+def _render_texto_png(text_lines: list[str], base_name: str, output_folder: str) -> str:
+    """Renderiza líneas de texto en un PNG 1200x800. Retorna la ruta generada."""
+    if Image is None:
+        raise ValueError("Pillow no disponible para renderizar texto a imagen")
+    if not text_lines:
+        text_lines = ["Documento sin contenido legible"]
+    out_path = os.path.join(output_folder, f"{base_name}_txt_01.png")
+    img = Image.new("RGB", (1200, 800), "white")
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("arial.ttf", 14)
+    except Exception:
+        font = ImageFont.load_default()
+    y = 10
+    for line in text_lines[:35]:
+        draw.text((10, y), line[:120], fill="black", font=font)
+        y += 22
+        if y > 750:
+            break
+    img.save(out_path, "PNG")
+    return out_path
+
+
+def word_to_imagenes(word_file_path: str, output_folder: str) -> list[str]:
+    """Convierte un Word (.docx) a imagen para IA: extrae texto y genera PNG."""
+    if not os.path.exists(word_file_path):
+        raise FileNotFoundError(f"El archivo Word no existe: {word_file_path}")
+    try:
+        from docx import Document
+    except ImportError as e:
+        raise ValueError("python-docx no disponible para convertir Word a imagen") from e
+
+    try:
+        log.info("Procesando archivo Word: %s", word_file_path)
+        doc = Document(word_file_path)
+        text_lines = []
+        for p in doc.paragraphs:
+            if p.text and p.text.strip():
+                text_lines.append(p.text.strip()[:200])
+                if len(text_lines) > 50:
+                    break
+        for table in doc.tables:
+            for row in table.rows:
+                vals = [c.text.strip() for c in row.cells if c.text and c.text.strip()]
+                if vals:
+                    text_lines.append(" | ".join(vals)[:200])
+                if len(text_lines) > 60:
+                    break
+            if len(text_lines) > 60:
+                break
+        base_name = os.path.splitext(os.path.basename(word_file_path))[0]
+        return [_render_texto_png(text_lines or ["Word sin contenido legible"], base_name, output_folder)]
+    except Exception as e:
+        log.error("Error al convertir Word %s: %s", word_file_path, e)
+        raise ValueError(f"No se pudo procesar Word: {word_file_path}. Error: {e}")
+
+
+def texto_to_imagenes(text_file_path: str, output_folder: str) -> list[str]:
+    """Convierte un archivo de texto (.csv/.txt/.eml/.html/.msg) a imagen para IA."""
+    if not os.path.exists(text_file_path):
+        raise FileNotFoundError(f"El archivo de texto no existe: {text_file_path}")
+    try:
+        log.info("Procesando archivo de texto: %s", text_file_path)
+        with open(text_file_path, "r", encoding="utf-8", errors="ignore") as f:
+            contenido = f.read(20000)
+        if text_file_path.lower().endswith((".html", ".htm")):
+            contenido = re.sub(r"<script.*?</script>", " ", contenido, flags=re.DOTALL | re.IGNORECASE)
+            contenido = re.sub(r"<style.*?</style>", " ", contenido, flags=re.DOTALL | re.IGNORECASE)
+            contenido = re.sub(r"<[^>]+>", " ", contenido)
+            contenido = re.sub(r"\s+", " ", contenido)
+        text_lines = [ln.strip()[:200] for ln in contenido.splitlines() if ln.strip()][:60]
+        base_name = os.path.splitext(os.path.basename(text_file_path))[0]
+        return [_render_texto_png(text_lines or ["Texto sin contenido legible"], base_name, output_folder)]
+    except Exception as e:
+        log.error("Error al convertir texto %s: %s", text_file_path, e)
+        raise ValueError(f"No se pudo procesar texto: {text_file_path}. Error: {e}")
+
+
+TIPOS_EXCEL = ("xls", "xlsx", "xlsm", "xltx", "excel", "sheet")
+TIPOS_WORD = ("docx", "docm")
+TIPOS_TEXTO = ("csv", "txt", "eml", "html", "htm", "msg", "log")
+TIPOS_IMAGEN_CONVERTIBLE = ("bmp", "tiff", "tif", "webp", "gif")
+
+
+def archivo_a_imagenes(local_file: str, output_folder: str) -> list[str]:
+    """Convierte un adjunto descargado a PNGs legibles por IA.
+
+    Retorna lista vacía si el formato no es convertible (ej. ZIP, video).
+    """
+    ft = os.path.splitext(local_file)[1].lower().lstrip(".")
+    if ft == "pdf":
+        return pdf_to_imagenes(local_file, output_folder)
+    if ft in TIPOS_EXCEL or "excel" in ft or "sheet" in ft:
+        return excel_to_imagenes(local_file, output_folder)
+    if ft in TIPOS_WORD:
+        return word_to_imagenes(local_file, output_folder)
+    if ft in TIPOS_TEXTO:
+        return texto_to_imagenes(local_file, output_folder)
+    if ft in ("jpg", "jpeg", "png"):
+        return [local_file]
+    if ft in TIPOS_IMAGEN_CONVERTIBLE and Image is not None:
+        try:
+            base_name = os.path.splitext(os.path.basename(local_file))[0]
+            out_path = os.path.join(output_folder, f"{base_name}_conv_01.png")
+            with Image.open(local_file) as img:
+                img.convert("RGB").save(out_path, "PNG")
+            return [out_path]
+        except Exception as e:
+            log.error("Error convirtiendo imagen %s: %s", local_file, e)
+            return []
+    return []
+
+
 def AdjuntosSQIS(ID_CLAIM: str) -> dict[str, list[str]]:
     """Descarga los adjuntos asociados a un caso y retorna URLs SAS por documento."""
     download_path = str(ADJUNTOS_DIR / ID_CLAIM)

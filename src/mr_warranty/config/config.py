@@ -45,6 +45,17 @@ SQL_TABLE = "mr_warranty.reclamos_procesados"
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY", "")
 
+# ── Tarifas IA (USD por millón de tokens, deployment gpt-4.1) ──
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, "").strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+IA_PRICE_INPUT_USD_PER_MTOK = _float_env("IA_PRICE_INPUT_USD_PER_MTOK", 2.0)
+IA_PRICE_OUTPUT_USD_PER_MTOK = _float_env("IA_PRICE_OUTPUT_USD_PER_MTOK", 8.0)
+
 # ── Azure Mistral ───────────────────────────────────────────
 AZURE_MISTRAL_ENDPOINT = os.getenv("AZURE_MISTRAL_ENDPOINT", "")
 AZURE_MISTRAL_API_KEY = os.getenv("AZURE_MISTRAL_API_KEY", "")
